@@ -36,6 +36,34 @@ class Mlp(val sizes: IntArray, rng: Rng, outScale: Float = 1f) {
 
     val output: FloatArray get() = act[nl]
 
+    /** Copies another network of the same shape, adds a random change of size [noise] (relative), and forgets optimiser state. */
+    fun copyFrom(o: Mlp, rng: Rng, noise: Float) {
+        for (l in 0 until nl) {
+            val s = sqrt(1f / sizes[l]) * noise
+            for (k in w[l].indices) w[l][k] = o.w[l][k] + rng.gauss() * s
+            for (k in b[l].indices) b[l][k] = o.b[l][k] + rng.gauss() * noise * 0.1f
+        }
+        resetOptimiser()
+    }
+
+    /** New random weights, as at the very start. */
+    fun randomise(rng: Rng, outScale: Float) {
+        for (l in 0 until nl) {
+            val s = sqrt(1f / sizes[l]) * (if (l == nl - 1) outScale else 1f)
+            for (k in w[l].indices) w[l][k] = rng.gauss() * s
+            java.util.Arrays.fill(b[l], 0f)
+        }
+        resetOptimiser()
+    }
+
+    fun resetOptimiser() {
+        step = 0
+        for (l in 0 until nl) {
+            java.util.Arrays.fill(mw[l], 0f); java.util.Arrays.fill(vw[l], 0f)
+            java.util.Arrays.fill(mb[l], 0f); java.util.Arrays.fill(vb[l], 0f)
+        }
+    }
+
     fun forward(x: FloatArray, off: Int = 0): FloatArray {
         System.arraycopy(x, off, act[0], 0, sizes[0])
         for (l in 0 until nl) {
@@ -74,6 +102,9 @@ class Mlp(val sizes: IntArray, rng: Rng, outScale: Float = 1f) {
             }
         }
     }
+
+    /** Gradient with respect to the input, from the last [backward] call. */
+    fun inputGrad(): FloatArray = dact[0]
 
     fun zeroGrad() {
         for (l in 0 until nl) { java.util.Arrays.fill(gw[l], 0f); java.util.Arrays.fill(gb[l], 0f) }

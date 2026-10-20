@@ -383,3 +383,53 @@ Code is in this folder. Shared Kotlin simulation (`core`), shared screen (`ui`),
 - Full creature description: `ANATOMY.md`.
 - Start changed to 5 Alpha, 20 Beta, 100 Gamma. The top bar shows species names next to the counts.
 - Plants reduced again to 400. Mac trackpad pinch zoom added (two-finger scroll and mouse wheel also zoom).
+- Restart button added (tap twice): new world and new random brain weights. Rescue explained in ANATOMY.md.
+- Litters per mating set by the user: Alpha 5-10, Beta 15-20, Gamma 30-50. A litter costs the mother 50% of her max energy (father 10%). Brain reward +5 to both parents per mating that gives babies (replaces +2/+1 per baby).
+- Rescue now rebuilds a wiped-out species from the genes of its 6 best creatures ever (most days lived, then most matings, then most kills), with small random changes. Population graph shows one row per species with its own scale.
+- Brains were hiding in shelters (reward paid for staying alive cheaply). Fix: reward food, matings, hurt and hunger only; death -3 unless old age with babies; look-ahead gamma 0.995; entropy 0.03.
+
+## 26. Version 2: fixes for the shelter trap and for learning [Decided by the user: "apply all these fixes"]
+- Found in v1 after 1.49 million steps: Alpha chose "shelter" 90% of the time and Beta 99%, at 0 energy, with 398 of 400 plants ripe. A shelter healed faster than starving hurt, so hiding forever was safe. Brains locked in (entropy 0.1). 530 rescues.
+- All 15 fixes added, each a switch per version (table in `ANATOMY.md` section 8): no shelter healing at 0 energy, shelter time limit, shelter room, more hunger cost in a shelter, plants smelled farther, exploring reward, adaptive curiosity, optional copying of instincts (off: still random start), minimum population and faster learning for small species, brain reset after many rescues, faster plant regrowth, cap 900, healthier babies, learned female mate choice, evolving brain families.
+- The exam: every 10,000 steps a frozen copy of the brains plays the same test world for 3,000 steps. Its score is the fair test of learning (live reward also moves with food and crowding).
+- Versions: every run has its own folder, settings and logs (`~/LineageRuns/v2`, ...). On screen: list, open, new version with switches, compare chart. Restart makes a new version. Old `live` folder = v1 (view only).
+- Screen: learning tab in the graph, verdict arrows in the top bar, help screen, follow button.
+
+## 27. Platform: every threshold per version, and a stats page [Decided by the user]
+- Every number is a setting of a version: world, reward (food x, mating, death, hurt x, hunger level and penalties, exploring), shelters, body, senses, breeding (per species: speed, health, lifespan, energy, hunger, bite, senses, maturity, litters, ...), and learning (brain size, decision interval, PPO numbers, curiosity, batch, families, exams). List: `Params.kt`.
+- New versions are made on screen ("+ New version" or "copy+edit"), from defaults, from v1-like settings, or from any version, and can start from random brains or from another version's brains. Settings are fixed once a version starts.
+- Stats page per species: verdict (exam, else live reward), charts of exam score, live reward, curiosity and population, current choices, deaths by cause, mate choice, brain families.
+
+## 28. Room for every species [Decided by the user]
+- Found: Gamma (30-50 babies per mating) filled the shared 900 cap by day 6, so Alpha and Beta could not have babies at all. Also a bug: a top-up of one creature was always a female, so Alpha ended with 0 males.
+- Fixed: each species has its own cap (Alpha 100, Beta 300, Gamma 500, inside the 900 total); top-ups add the missing sex; Gamma litters are 5-10 by default (changeable per version).
+- Versions can be deleted from the versions list (tap delete twice). The running version cannot be deleted.
+
+## 29. World rules set by the user
+- Anyone can eat anything: every species eats plants and meat (Beta and Gamma get 70% from meat) and every species may attack the other species.
+- Meat only comes from an accident (killed, or injured in a stranger's shelter), as much as the energy the body still had. Starving and old age leave no meat.
+- After eating to full, a creature cannot eat again until its energy is below 70% (setting "Can eat again below").
+- Shelters send a signal their own species can pick up from 30 cells away (drawn as spreading rings; tap a shelter to see the range).
+- Shelters drift around the map (0.25 cells/s), bounce off the edges and never overlap. Food under a shelter cannot be eaten; plants start outside shelters and meat is never dropped inside one.
+- Nobody can mate inside a shelter. Shelters are only for protection.
+- All of these are settings per version (World and Shelters tabs).
+
+## 30. Forage choice, hungry-rest cost, bigger brain [Decided by the user]
+- Found in v5: only 27 of 400 plants ripe at a time; a free ripe plant within smell for 0-1% of Gamma and Beta decisions, so "eat plant" was almost never possible; brains could only explore (random walk) or rest. Exam scores flat for Alpha and Gamma.
+- Added: a 10th choice "forage" (walk toward food sensed within 25 cells), a 0.02 penalty for resting below 50% energy, and a bigger brain (64 units, 2 layers by default, layers settable 1-4).
+- First 40,000-step check: resting fell from 35-42% to 6-11% of choices, forage is used 5-18%, eating plants rose (Gamma 2% to 5%, Alpha to 21%), Gamma energy 42% to 58%. Too early for exam verdicts.
+
+## 31. Group attacks, seeing health, cleaner map [Decided by the user]
+- Only ripe plants are drawn; the shelter signal ring is no longer drawn.
+- Bites: Beta 18, Gamma 12, so 5-7 Gammas can kill an Alpha (tested: 6 Gammas win at least 8 times in 10).
+- Every species sees the health of the animal it senses and how many of its own and other species are around (4 new inputs, 34 in all).
+- Cost noted: the bigger brain (64 units) makes learning about 3x slower per step (about 58 steps/s with 500 creatures on the Mac).
+
+## 32. Strangers' shelters survivable, slower shelters, version names [Decided by the user]
+- Tests over 2,000-3,000 game days: wipe-outs did not fall with time; about two thirds of Alpha deaths and most Beta deaths were "injury" (drifting strangers' shelters rolling over them at 3% health per step).
+- New defaults: damage in a stranger's shelter 0.003 per step (about 30 s to die instead of 3 s), shelters drift at 0.05 cells/s (was 0.25).
+- Versions can be named (rename in the versions list, or a name when creating one). The name is kept in label.txt; the folder (v7) does not change.
+
+## 33. Looking inside the brains [Decided by the user]
+- Brain view per creature (senses, neurons, choice chances, integrated-gradient reasons), a Brains tab per species (sense importance, senses x choices, neuron health), and `--explain` CSV reports. Details in ANATOMY.md section 12.
+- Running alongside: a 2-layer vs 3-layer test (same seed and settings) to decide whether more hidden layers help.

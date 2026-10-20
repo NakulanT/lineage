@@ -19,7 +19,7 @@ import lineage.core.SimEngine
 import lineage.ui.Scene
 import lineage.ui.UiController
 
-class SimView(context: Context, private val scene: Scene, private val ui: UiController) : View(context) {
+class SimView(context: Context, private var scene: Scene, private var ui: UiController) : View(context) {
     private val gfx = AndroidGfx()
     private var running = false
 
@@ -48,6 +48,11 @@ class SimView(context: Context, private val scene: Scene, private val ui: UiCont
         return true
     }
 
+    fun setScene(s: Scene) { scene = s; ui = UiController(s) }
+
+    /** Back button: closes an open window or panel first. */
+    fun back(): Boolean = ui.back()
+
     fun resume() { running = true; invalidate() }
     fun pause() { running = false }
 
@@ -74,10 +79,20 @@ class MainActivity : Activity() {
             View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
 
         engine = SimHost.ensure(applicationContext)
-        val scene = Scene(engine)
+        SimHost.activity = this
+        val scene = Scene(engine, SimHost)
         scene.uiScale = resources.displayMetrics.density
+        if (SimHost.isStarter()) { engine.speed = 0; scene.menus.editFrom(null) }
         view = SimView(this, scene, UiController(scene))
         setContentView(view)
+        SimHost.onSwitched = {
+            SimHost.engine()?.let { e ->
+                engine = e
+                val sc = Scene(e, SimHost)
+                sc.uiScale = resources.displayMetrics.density
+                view.setScene(sc)
+            }
+        }
 
         // keep running with the screen off
         startForegroundService(Intent(this, SimService::class.java))
@@ -100,10 +115,20 @@ class MainActivity : Activity() {
         }
     }
 
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        if (!view.back()) @Suppress("DEPRECATION") super.onBackPressed()
+    }
+
     override fun onResume() {
         super.onResume()
         engine.snapshotHz = 30
         view.resume()
+    }
+
+    override fun onDestroy() {
+        if (SimHost.activity === this) SimHost.activity = null
+        super.onDestroy()
     }
 
     override fun onPause() {

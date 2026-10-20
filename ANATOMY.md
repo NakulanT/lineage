@@ -21,7 +21,7 @@ Time: one **step** is 0.1 s at normal speed. One **day** is 100 steps (10 s). Di
 | Lifespan (days) | 120 | 80 | 50 |
 | Max energy | 200 | 120 | 100 |
 | Hunger (energy per step) | 0.06 | 0.05 | 0.04 |
-| Bite damage | 24 | 8 | 3 |
+| Bite damage | 24 | 18 | 12 |
 | Bite reach (cells) | 1.8 | 1.2 | 1.0 |
 | Time between bites (steps) | 12 | 12 | 15 |
 | Plant food value | 0.8 x | 1.15 x | 1.0 x |
@@ -40,7 +40,7 @@ Only Alpha hunts. Beta and Gamma have a bite value, but nothing in their brain l
 | Sight range (cells) | 10 | 8 | 6 | Only in front, inside a cone |
 | Sight cone (full angle) | 70° (narrow) | 110° | 190° (wide) | |
 | Hearing (cells) | 5 | 6 | 8 | All around, any direction |
-| Smell (cells) | 6 | 6 | 6 | Finds ripe plants. Meat is smelled 1.5 x farther |
+| Smell (cells) | 6 | 6 | 6 | Meat is smelled 1.5 x farther. Ripe plants are smelled `smellScale` (1.5) x farther: 9 cells (fix 5) |
 | Mating call (cells) | 40 | 26 | 16 | How far a male can find a female. Rarer species call farther |
 
 Sight range is multiplied by the creature's vision gene.
@@ -50,12 +50,13 @@ Sight range is multiplied by the creature's vision gene.
 ## 3. The brain
 
 ### 3.1 What a brain is
-- Each species has **one brain** (one set of weights). Every creature of that species uses it, and every creature's
-  experience trains it. So "Beta learns" means the shared Beta brain gets better.
-- The brain is two small neural networks:
-  - **Policy (decides):** 26 inputs → 32 tanh → 32 tanh → 9 outputs (one score per choice).
-  - **Value (judges how good the situation is):** 26 inputs → 32 tanh → 32 tanh → 1 output.
-- Size: 2,217 numbers in the policy, 1,953 in the value network, **4,170 per species**.
+- Each species has a few **brain families** (fix 15): Alpha 2, Beta 2, Gamma 3. Every creature uses its family's
+  brain, and its experience trains that brain. A baby gets its mother's family. See 3.9.
+- A brain is two small neural networks:
+  - **Policy (decides):** 30 inputs → 32 tanh → 32 tanh → 9 outputs (one score per choice).
+  - **Value (judges how good the situation is):** 30 inputs → 32 tanh → 32 tanh → 1 output.
+- Size: 2,345 numbers in the policy, 2,081 in the value network, **4,426 per brain**.
+- Females also have a small **mate-choice** learner per species (fix 14, see 5.2).
 - Hidden layer size (32) is the setting `brainSize`, the "brain capacity" from the plan.
 - **Starts random:** weights drawn from a normal distribution scaled by 1 / √(inputs), the last policy layer scaled
   down 100 x, biases zero. At the start every allowed choice is about equally likely.
@@ -64,7 +65,7 @@ Sight range is multiplied by the creature's vision gene.
 Every 6 steps (0.6 s), each creature looks at its 26 senses and picks one choice. Creatures are spread out so they do
 not all think in the same step. Between decisions the body keeps doing the chosen thing.
 
-### 3.3 The 26 inputs (all between 0 and 1)
+### 3.3 The 30 inputs (all between 0 and 1)
 
 | # | Input | # | Input |
 |---|---|---|---|
@@ -81,6 +82,8 @@ not all think in the same step. Between decisions the body keeps doing the chose
 | 10 | how close that plant is | 23 | how close its mother is (young only) |
 | 11 | meat is within smell (Alpha) | 24 | is inside another species' shelter (losing health) |
 | 12 | how close that meat is | 25 | how close the nearest foreign shelter is (within 10 cells) |
+| 26 | ripe plants within twice the smell range (8 or more = 1) | 27 | time spent in its shelter this stay / longest stay |
+| 28 | must stay out of its shelter for now | 29 | share of the map (8 x 8 parts) it has been to |
 
 "How close" is 1 when it is right there and 0 at the edge of the sense range.
 
@@ -93,7 +96,7 @@ not all think in the same step. Between decisions the body keeps doing the chose
 | 2 | eat meat | meat is smelled (Alpha) | walk to it, eat 1.2 per step |
 | 3 | hunt | prey sensed, not tired (Alpha) | sprint at 2 x speed, bite when in reach. Gives up after 140 steps, then rests 120 steps |
 | 4 | flee | a predator is sensed | run away at 1.1 x speed |
-| 5 | shelter | own shelter within 40 cells | go inside and stay. Heals there |
+| 5 | shelter | own shelter within 40 cells, with room, not sent out lately | go inside and stay. Heals there unless starving |
 | 6 | mate | adult male, female within calling range | walk to her and ask. She decides (see 5.2) |
 | 7 | follow mother | young, mother alive | stay close to her. She shares food |
 | 8 | rest | always | stand still until the next decision |
@@ -106,19 +109,28 @@ Added up between two decisions:
 
 | Event | Reward |
 |---|---|
-| Still alive at a decision | +0.01 |
-| Energy change | + gained / max energy (eating is good, spending is bad) |
-| Health change | + change / max health (getting hurt is bad, healing is good) |
-| Each baby born | +2 for the mother, +1 for the father |
-| Dies from being killed, starving or a foreign shelter | -3 |
-| Dies of old age | 0 |
+| Eats | + energy from the food / max energy (a plant is about +0.4 to +0.5, meat adds up the same way) |
+| Each mating that gives babies | +5 for the mother and +5 for the father |
+| Gets hurt | − health lost / max health (healing gives nothing) |
+| Very hungry (energy below 25%) | −0.02 at every decision, −0.04 inside its own shelter (fix 4) |
+| Reaches a part of the map (one of 8 x 8) it has never been to | +0.05 (fix 6) |
+| Dies (killed, starved, inside a foreign shelter, or old age without any babies) | −3 |
+| Dies of old age after having babies | 0 |
+
+Walking, resting, spending energy and just staying alive give nothing on their own. An earlier version paid for
+staying alive and charged for every bit of energy spent, and the brains learned to sit in their shelters.
+Version 1 then found a second trap: a shelter healed faster than starving hurt, so Alpha and Beta sat in their
+shelters at 0 energy forever. Fixes 1 to 4 close it.
 
 ### 3.6 How it learns (PPO)
-- Experience is collected per species. Each time 2,048 finished decisions are collected, the brain learns from them.
-- Advantage: GAE with discount γ = 0.98 and λ = 0.95, normalised per batch.
+- Experience is collected per brain. Each time enough finished decisions are collected, the brain learns from
+  them: Alpha 512, Beta 1,024, Gamma 2,048 (fix 9: small species learn more often).
+- Advantage: GAE with discount γ = 0.995 (looks about 200 decisions, 2 minutes, ahead) and λ = 0.95, normalised per batch.
 - Update: 4 passes over the batch in groups of 256. Policy step size 0.0003, value step size 0.0009 (Adam).
-- Clip 0.2 (the policy may not change too much at once), entropy bonus 0.01 (keeps some curiosity),
+- Clip 0.2 (the policy may not change too much at once), entropy bonus 0.03 (keeps it curious so it does not lock in early),
   gradient size limited to 0.5.
+- Fix 7: if a brain's entropy falls below 0.4 (it locked into one choice), its entropy bonus is multiplied by 1.5
+  after each update (up to 0.25). Once entropy is above 0.9 again it goes back down towards 0.03.
 - Learning never stops: it goes on as long as the world runs, on the laptop and on the phone.
 
 ### 3.7 Optional: copying instincts first
@@ -126,10 +138,32 @@ Added up between two decisions:
 Default is 0, so the world starts from random brains.
 
 ### 3.8 Files
-- `brains.bin`: the weights of all three brains, saved with the world.
-- `training.csv`: one row per learning update. For `learn` rows the columns `a` to `f` are: average reward per
-  decision, policy loss, value loss, entropy (how undecided the brain is), approximate KL (how much it changed),
-  clip fraction.
+- `brains.bin`: the weights of all brains and the mate-choice learners, saved with the world.
+- `training.csv`: columns `tick,species,family,phase,update,a,b,c,d,e,f,g,samples`.
+  - `learn` rows (one per update): `a` average reward per decision, `b` policy loss, `c` value loss, `d` entropy
+    (how undecided the brain is), `e` approximate KL (how much it changed), `f` clip fraction, `g` entropy bonus used.
+  - `exam` rows: `a` exam score (reward per decision in the test world), `b` meals per creature per day.
+  - `choice` rows (mate choice, every 200 asks): `a` accept rate, `b` share of babies that grow up, `c` bias,
+    `d` weight on his strength, `e` weight on his health, `f` weight on his kills.
+  - `copy_of` and `reset` rows: a brain family was replaced (3.9) or reset (fix 10).
+
+### 3.9 Brain families (fix 15: brains that evolve)
+- Alpha has 2 families, Beta 2, Gamma 3. At the start the creatures are split evenly. A baby joins its mother's family.
+- Every 3,000 steps, a family with no members left is replaced by a copy of the family with the most members
+  (if it has at least 4), with a small random change to every weight (2%). A few members of the big family move over
+  so the new copy gets tried out.
+- So brains are both trained (PPO, during life) and selected (families whose creatures survive and breed spread).
+
+### 3.10 The exam (is it really learning?)
+The live reward also moves with food and crowding, so it is not a fair test on its own. Every 10,000 steps, a
+frozen copy of all brains plays the same test world (same map, same creatures, seed 777) for 3,000 steps, without
+learning. Its score per species is the average reward per decision. Only the brains differ between exams, so a rising
+exam score means better brains. The screen shows the exam's verdict once there are 5 exams: a straight line through
+the scores must rise by more than twice its uncertainty to count as improving.
+
+### 3.11 Reset (fix 10)
+If a species needs 10 rescues (it died out 10 times) within 30,000 steps, all its brains get new random weights
+(at most once per 30,000 steps). Logged in `events.csv` as `brain_reset`.
 
 ---
 
@@ -141,8 +175,11 @@ Default is 0, so the world starts from random brains.
 - **Metabolism (traits cost food):** 0.5 + 0.15 × speed gene + 0.10 × strength gene + 0.12 × health gene
   + 0.08 × vision gene + 0.05 × lifespan gene. A creature with every gene at 1.0 has metabolism 1.0.
 - **Starving:** at 0 energy it loses 0.3 health every step.
-- **Healing:** inside its own shelter +0.4% of max health per step. Elsewhere +0.03% per step if energy is above half.
-- **Inside another species' shelter:** loses 3% of max health every step (dead in about 3 seconds).
+- **Healing:** inside its own shelter +0.4% of max health per step, but only if its energy is above 0 (fix 1).
+  Elsewhere +0.03% per step if energy is above half.
+- **Shelter stays (fix 2):** at most 300 steps in one go, then it must leave and stay out for 200 steps.
+- **Shelter room (fix 3):** an Alpha shelter holds 4, a Beta shelter 6, a Gamma shelter 8 (inside or on the way in).
+- **Inside another species' shelter:** loses 0.3% of max health every step (dead in about 30 seconds; was 3%).
 - **Old age:** dies when age passes lifespan × lifespan gene.
 - **Moving:** turns at most 0.35 rad per step. Stays inside the map.
 
@@ -157,17 +194,26 @@ Default is 0, so the world starts from random brains.
 - A male waits 60 steps after each try.
 
 ### 5.2 Female choice
-When a male reaches her, the female scores him:
-score = 0.5 × his health fraction + 0.5 × (his strength gene − 0.6, between 0 and 1).
+**Learned (fix 14, the default):** when a male reaches her, she looks at 8 things: his health, his strength, speed
+and health genes, his age, his kills, her own energy and her own age. A small learner per species (a logistic
+choice) gives the chance of saying yes. It starts at about 73% yes for everyone.
+- Saying no pays 0.
+- Saying yes pays 0.2 plus (share of that litter that grows up − the species' usual share), worked out when the
+  last baby of the litter grows up or dies.
+- So she learns to prefer males whose babies survive more often than usual.
+
+**Fixed rule (fix 14 off):** score = 0.5 × his health fraction + 0.5 × (his strength gene − 0.6, between 0 and 1).
 She accepts if score + a small random amount (±0.12) is above her own pickiness (0.30 to 0.55, fixed per female).
-This is still a fixed rule, not learned.
 
 ### 5.3 Babies
-- Litter: Alpha 1, Beta 1 to 2, Gamma 2 to 4, scaled by the parents' fertility gene.
-- Each baby costs the mother 33% of her max energy. She can only have as many as her energy allows,
-  so breeding depends on food. The father pays 4% of his max energy.
-- A newborn starts with 30% energy, appears next to its mother, and stays a baby: Alpha 8 days, Beta 6, Gamma 3.
-- A mother gives 12 energy to her young when it is below 60% and she is above 55% (at most every 40 steps).
+- Babies from one mating: Alpha 5 to 10, Beta 15 to 20, Gamma 5 to 10 (was 30 to 50, which filled the cap in 6 days),
+  scaled by the parents' fertility gene. If the total cap or the species' own cap would be passed, the litter is cut to fit.
+- One litter costs the mother 50% of her max energy, whatever its size (she needs at least 60% to mate).
+  The father pays 10% of his max energy.
+- A newborn starts with 50% energy (fix 13; was 30%), appears next to its mother, and stays a baby: Alpha 8 days,
+  Beta 6, Gamma 3.
+- A mother gives 16 energy (fix 13; was 12) to her young when it is below 60% and she is above 55% (at most every
+  40 steps).
   She loses exactly what the baby gains.
 
 ---
@@ -189,7 +235,7 @@ Six numbers per creature, 1.0 = species average:
 - A baby takes each gene from one parent at random, then adds a small random change (normal, 0.03), kept between
   0.5 and 1.8.
 - Every gene above 1 costs extra food (see metabolism), so nothing can be best at everything.
-- The brain is **not** passed on by genes yet: all members of a species share the same learning brain.
+- The brain is passed on by family, not by genes: a baby uses its mother's brain family (see 3.9).
 
 ---
 
@@ -199,18 +245,97 @@ Six numbers per creature, 1.0 = species average:
 |---|---|
 | Map | 128 × 128 cells |
 | Start | 5 Alpha, 20 Beta, 100 Gamma |
-| Population cap | 1,500 |
+| Population cap | 900 in total (fix 12; was 1,500), and at most Alpha 100, Beta 300, Gamma 500 |
 | Plants | 400, one kind only |
 | Plant food | 50 energy (times the species' plant value) |
-| Plant regrowth | from 0 to ripe in 1,700 steps, in the same place. Only ripe plants can be eaten |
+| Plant regrowth | from 0 to ripe in 1,000 steps (fix 11; was 1,700), in the same place. Only ripe plants can be eaten |
 | Meat | left by every death. Rots after 3,000 steps |
 | Shelters | circles: 1 Alpha, 5 Beta, 20 Gamma. Anyone can walk in; strangers lose health fast |
-| Rescue | on: if a species dies out, 6 are added (logged in events.csv) |
-| Mutation | 0.03 |
+| Rescue | on: if a species dies out, 6 are added (see below) |
+| Minimum population | Alpha 3, Beta 6, Gamma 12 (fix 9): checked every 600 steps, topped up from the best genes |
+| Gene mutation | 0.03 |
+| Restart button | a new version with the same settings, new map, new creatures, new random brain weights (tap twice) |
+
+**How a species comes back (rescue):** the world keeps the 6 best creatures each species ever had. "Best" is
+decided in this order: lived the most days, then mated the most, then killed the most. The moment a species reaches 0,
+6 new adults appear at random places, alternating male and female, with full energy and health and generation 1.
+Their genes are copied from those 6 best creatures (one each), with a small random change (normal, 0.03) so they are
+not exact copies. They use the species' existing brain, so what the species learned is kept too. Each rescue is
+written to `events.csv` as `rescue`, naming the creatures whose genes were used.
+Switch it off with `--no-rescue`; then a species that dies out stays gone.
 
 ---
 
-## 8. Not built yet
-- Females learning their choice of mate.
-- Brains passed to babies with mutation (evolving brains).
+## 8. Versions
+Every run is a **version** with its own folder (`~/LineageRuns/v2`, `v3`, ... on the laptop) holding
+`settings.txt`, `note.txt`, the logs, the world and the brains. All 15 fixes can be switched on or off per version
+(the "+ New version" screen, or `--fixes-off 1,4` / `--v1` on the command line). The old folder `live` is shown as v1.
+
+| # | Fix | Off (v1) | On (default) |
+|---|---|---|---|
+| 1 | Shelter does not heal a starving creature | heals | no healing at 0 energy |
+| 2 | Shelter stays have a time limit | none | 300 steps, then 200 out |
+| 3 | Shelters have limited room | none | 4 / 6 / 8 |
+| 4 | Hunger costs more inside a shelter | −0.02 | −0.04 |
+| 5 | Plants are smelled farther | 6 cells | 9 cells, plus a "rich area" input |
+| 6 | Reward for exploring new places | 0 | +0.05 per new part of the map |
+| 7 | More curiosity when a brain locks in | fixed 0.03 | raised while entropy < 0.4 |
+| 8 | Copy instincts first | off | off by default (on = 3,000 steps of copying) |
+| 9 | Minimum population, small species learn faster | none, batch 2,048 | 3 / 6 / 12, batch 512 / 1,024 / 2,048 |
+| 10 | Reset a brain that keeps dying out | never | 10 rescues in 30,000 steps |
+| 11 | Plants grow back faster | 1,700 steps | 1,000 steps |
+| 12 | Lower cap, room for each species | 1,500 total | 900 total, 100 / 300 / 500 per species |
+| 13 | Healthier babies | 30% energy, mother gives 12 | 50%, mother gives 16 |
+| 14 | Females learn mate choice | fixed rule | learned |
+| 15 | Brain families that evolve | 1 brain per species | 2 / 2 / 3 families |
+
+---
+
+## 9. World rules (set by the user)
+- **Anyone can eat anything.** Every species eats plants and meat (meat value: Alpha 1.0, Beta 0.7, Gamma 0.7) and may attack the other species ("hunt" is open to all when another species is seen or heard).
+- **Meat comes only from accidents:** a body that was killed or died in a stranger's shelter leaves meat equal to the energy it still had. Starving and old age leave none.
+- **Full means full:** after eating to full energy, a creature cannot eat again until its energy is below 70%.
+- **Shelters send a signal** their own species picks up from 30 cells (inputs 21 and 22 use this range).
+- **Shelters drift** at 0.05 cells per second (was 0.25), turn now and then, bounce off the edges and never overlap. Food under a shelter cannot be eaten.
+- **No mating inside a shelter.**
+
+## 10. Forage, hungry resting, bigger brain
+- **Forage** (choice 9): walk toward the middle of the food it senses within the forage range (25 cells: ripe free plants and
+  meat, closer food counts more). Once close, smell takes over and "eat plant" / "eat meat" become possible. Input 26 is now
+  how much food is within the forage range. Before this, "explore" (a random walk) was the only way to look for food.
+- **Resting while hungry** costs 0.02 per decision when energy is below 50%, so searching pays more than standing still.
+- **Bigger brain:** 64 units per layer (was 32), 2 layers (setting "Brain layers", 1 to 4). About 6,700 numbers in the
+  policy and 6,200 in the value network per brain. Brains saved by older versions (32 units, 9 choices) do not fit and
+  start again from random weights.
+
+## 11. Group attacks and seeing health
+- Bites are stronger: Beta 18 (was 8), Gamma 12 (was 3). Six adult Gammas biting together bring down a healthy adult
+  Alpha (200 health) in about 3 rounds, before it can kill more than two of them.
+- Four more inputs (34 in all): 30 = health of the prey it senses, 31 = health of the predator it senses,
+  32 = own species nearby (8 or more = 1), 33 = other species nearby. So a brain can learn that a weak or
+  outnumbered animal is worth attacking, for every species.
+- On screen, only ripe plants are drawn, and shelters no longer show the spreading signal ring (tap a shelter to see
+  its signal range).
+
+## 12. Looking inside a brain (interpretability)
+- **One creature:** tap it, then **brain** in its panel. Shows its 34 senses (value and push), both hidden layers
+  (64 squares each; orange = firing +, blue = firing -), the chance of each of the 10 choices, and the top reasons
+  for the choice it made.
+- **Push (feature attribution):** integrated gradients, 16 steps from "senses nothing" (all inputs 0) to the real input,
+  on the log-chance of the chosen action. The pushes add up to how much more (or less) likely the choice is than with no
+  senses at all.
+- **A whole species:** stats, **Brains** tab. From one decision in 20 (setting `explainEvery`; gradient x input, one
+  pass): the senses that matter most, a senses x choices map (orange = makes the choice more likely), and neuron health
+  per layer (working, mostly off = dead, mostly maxed out) with what the most active neurons react to. Old samples fade,
+  so it shows the brains as they are now.
+- **Command line:** `--explain FOLDER [--ticks N]` loads a version, watches its frozen brains for N steps (nothing is
+  saved) and writes `brain_report.csv` (species, choice, sense, mean push, mean strength) and `brain_neurons.csv`.
+  Headless runs with `--out` write both files at the end too.
+
+## 13. Every species has every ability
+- All 10 choices are open to every species when they make sense. Alpha can now flee too.
+- A **threat** (inputs 13-15 and 31) is the nearest animal of another species that is hunting or biting it, or of a
+  stronger species. So a Gamma sees Alpha and Beta as threats, and an Alpha sees a group of Gammas hunting it as one.
+
+## 14. Not built yet
 - Social memory, food sharing beyond mother and baby, signals, killing within a species (see `PHASE_2.md`).

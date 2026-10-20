@@ -20,6 +20,16 @@ class SimEngine(val world: World, private val saveFile: java.io.File? = null, pr
 
     fun latest(): RenderSnapshot? = latest.get()
 
+    @Volatile private var restartSeed = 0L
+    @Volatile private var restartWanted = false
+
+    /** Asks for a brand-new world with random brains. Done safely on the simulation thread. */
+    fun requestRestart(seed: Long = System.nanoTime()) {
+        restartSeed = seed
+        restartWanted = true
+        selectedUid = -1
+    }
+
     /** Builds a snapshot right now on the calling thread. Used for screenshots and tests. */
     fun publishNow() {
         val snap = world.makeSnapshot(selectedUid)
@@ -60,6 +70,13 @@ class SimEngine(val world: World, private val saveFile: java.io.File? = null, pr
         var lastSave = world.tick
 
         while (running) {
+            if (restartWanted) {
+                restartWanted = false
+                world.restart(restartSeed)
+                lastSave = world.tick
+                saveNow()
+                lastPublish = 0L
+            }
             val now = System.nanoTime()
             val sp = speed
             if (sp == 0) {

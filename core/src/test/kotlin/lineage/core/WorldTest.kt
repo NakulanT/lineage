@@ -9,7 +9,7 @@ import kotlin.test.assertTrue
 class WorldTest {
     private fun small(seed: Long = 7L) = SimConfig(
         seed = seed, width = 96, height = 96, startCounts = intArrayOf(10, 50, 200),
-        hardCap = 600, plants = 700, shelters = intArrayOf(1, 3, 6),
+        hardCap = 600, plants = 700, shelters = intArrayOf(1, 3, 6), brainSize = 16,
     )
 
     @Test
@@ -35,7 +35,7 @@ class WorldTest {
     fun instinctsKeepStrangersOutOfShelters() {
         val cfg = small()
         val w = World(SimConfig(seed = cfg.seed, width = 96, height = 96, startCounts = intArrayOf(10, 50, 200),
-            hardCap = 600, plants = 700, shelters = intArrayOf(1, 3, 6), brain = false))
+            hardCap = 600, plants = 700, shelters = intArrayOf(1, 3, 6), brain = false).with(mapOf("shelterSpeed" to "0")))
         repeat(1200) {
             w.step()
             for (n in 0 until w.nOrder) {
@@ -60,7 +60,7 @@ class WorldTest {
         val before = w.hp[i]
         val maxBefore = w.maxHp(i)
         w.step()
-        if (w.alive[i]) assertTrue(before - w.hp[i] >= maxBefore * 0.02f, "health only fell from $before to ${w.hp[i]}")
+        if (w.alive[i]) assertTrue(before - w.hp[i] >= maxBefore * w.cfg.foreignShelterDamage * 0.7f, "health only fell from $before to ${w.hp[i]}")
     }
 
     @Test
@@ -106,5 +106,23 @@ class WorldTest {
         assertTrue(lines.size > 3, "population rows missing")
         assertTrue(lines[0].startsWith("tick,day,species"))
         dir.deleteRecursively()
+    }
+
+    @Test
+    fun rescueUsesTheBestGenesWithSmallChanges() {
+        val w = World(small())
+        // make one Alpha the clear champion: very old, with strong genes
+        val champ = (0 until w.cap).first { w.alive[it] && w.sp[it].toInt() == ALPHA }
+        for (k in 0 until NG) w.genes[champ * NG + k] = 1.6f
+        w.age[champ] = 10_000_000
+        w.rememberChampion(champ)
+        assertEquals(w.hofUid[ALPHA][0], w.uid[champ])
+        val made = w.rescueSpecies(ALPHA)
+        assertTrue(made.isNotEmpty())
+        // the first rescued creature copies the champion, give or take the small random change
+        for (k in 0 until NG) {
+            val g = w.genes[made[0] * NG + k]
+            assertTrue(g > 1.45f && g < 1.75f, "gene $k is $g")
+        }
     }
 }

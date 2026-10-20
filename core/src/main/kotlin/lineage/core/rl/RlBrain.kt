@@ -1,5 +1,6 @@
 package lineage.core.rl
 
+import lineage.core.LearnCurve
 import lineage.core.NSP
 import lineage.core.Rng
 import lineage.core.Species
@@ -12,12 +13,13 @@ import java.io.FileWriter
 import kotlin.math.exp
 import kotlin.math.ln
 import kotlin.math.max
+import kotlin.math.min
 
 /** Number of numbers a creature senses each decision. */
-const val OBS = 26
+const val OBS = 34
 
 /** Choices a creature can make (each one is carried out by the body's own walking code). */
-const val NA = 9
+const val NA = 10
 const val A_EXPLORE = 0
 const val A_EAT_PLANT = 1
 const val A_EAT_MEAT = 2
@@ -27,27 +29,36 @@ const val A_SHELTER = 5
 const val A_MATE = 6
 const val A_FOLLOW = 7
 const val A_REST = 8
+/** Walk toward where food is, sensed from farther away than smell (the "forage range"). */
+const val A_FORAGE = 9
 
-val ACTION_NAMES = arrayOf("explore", "eat plant", "eat meat", "hunt", "flee", "shelter", "mate", "follow mother", "rest")
+val ACTION_NAMES = arrayOf("explore", "eat plant", "eat meat", "hunt", "flee", "shelter", "mate", "follow mother", "rest", "forage")
 
 class RlParams(
-    val hidden: Int = 32,
+    val hidden: Int = 64,
+    /** Hidden layers in each network. */
+    val layers: Int = 2,
     val batch: Int = 2048,
     val epochs: Int = 4,
     val minibatch: Int = 256,
     val lr: Float = 3e-4f,
-    val gamma: Float = 0.98f,
+    val gamma: Float = 0.995f,
     val lambda: Float = 0.95f,
     val clip: Float = 0.2f,
-    val entropy: Float = 0.01f,
+    val entropy: Float = 0.03f,
     val maxGrad: Float = 0.5f,
     val bcBatch: Int = 4096,
+    /** Fix 7: raise the entropy bonus when the brain locks in, lower it back when it is curious again. */
+    val adaptiveEntropy: Boolean = false,
+    val entropyLow: Float = 0.4f,
+    val entropyHigh: Float = 0.9f,
+    val entropyMax: Float = 0.25f,
 )
 
-/** One species' brain: a policy network, a value network, and the experience gathered for learning. */
-class SpeciesLearner(val sp: Int, val p: RlParams, cap: Int, private val rng: Rng) {
-    val pi = Mlp(intArrayOf(OBS, p.hidden, p.hidden, NA), rng, 0.01f)
-    val vf = Mlp(intArrayOf(OBS, p.hidden, p.hidden, 1), rng, 1f)
+/** One brain: a policy network, a value network, and the experience gathered for learning. */
+class SpeciesLearner(val sp: Int, val family: Int, val p: RlParams, val batch: Int, cap: Int, private val rng: Rng) {
+    val pi = Mlp(IntArray(p.layers + 2) { if (it == 0) OBS else if (it == p.layers + 1) NA else p.hidden }, rng, 0.01f)
+    val vf = Mlp(IntArray(p.layers + 2) { if (it == 0) OBS else if (it == p.layers + 1) 1 else p.hidden }, rng, 1f)
 
     // experience buffer (PPO)
     private val capacity = cap
@@ -76,6 +87,12 @@ class SpeciesLearner(val sp: Int, val p: RlParams, cap: Int, private val rng: Rn
     var updates = 0
     var bcUpdates = 0
     var lastStats = ""
+    /** Current entropy bonus (changes when [RlParams.adaptiveEntropy] is on). */
+    var entCoef = p.entropy
+    var lastReward = 0f
+    var lastEntropy = 0f
+    /** Times this brain was replaced by a copy of a better family or reset. */
+    var replaced = 0
 
     private val probs = FloatArray(NA)
     private val dlog = FloatArray(NA)
@@ -123,6 +140,25 @@ class SpeciesLearner(val sp: Int, val p: RlParams, cap: Int, private val rng: Rn
     fun close(t: Int, r: Float, nv: Float, isDone: Boolean) {
         rew[t] += r; nextV[t] = nv; done[t] = isDone
         if (!complete[t]) { complete[t] = true; nComplete++ }
+    }
+
+    /** Throws away the gathered experience (after the weights were replaced). */
+    fun clearBuffer() { count = 0; nComplete = 0; bcN = 0 }
+
+    /** Becomes a changed copy of [o] (brain evolution). */
+    fun copyFrom(o: SpeciesLearner, noise: Float) {
+        pi.copyFrom(o.pi, rng, noise); vf.copyFrom(o.vf, rng, noise)
+        entCoef = o.entCoef
+        clearBuffer()
+        replaced++
+    }
+
+    /** New random weights (fix 10). */
+    fun randomise() {
+        pi.randomise(rng, 0.01f); vf.randomise(rng, 1f)
+        entCoef = p.entropy
+        clearBuffer()
+        replaced++
     }
 
     // ------------------------------------------------------------------
@@ -203,6 +239,7 @@ class SpeciesLearner(val sp: Int, val p: RlParams, cap: Int, private val rng: Rn
         val std = max(1e-6, Math.sqrt(sq / max(1, m)))
         for (t in idx) adv[t] = ((adv[t] - mean) / std).toFloat()
 
+        val ec = entCoef
         var piLoss = 0.0; var vLoss = 0.0; var ent = 0.0; var kl = 0.0; var clipped = 0; var seen = 0
         repeat(p.epochs) {
             shuffle(idx)
@@ -224,7 +261,7 @@ class SpeciesLearner(val sp: Int, val p: RlParams, cap: Int, private val rng: Rn
                     for (j in 0 until NA) if (probs[j] > 0f) h -= probs[j] * ln(probs[j])
                     for (j in 0 until NA) {
                         if (!mask[t * NA + j] || probs[j] <= 0f) { dlog[j] = 0f; continue }
-                        val g = dlp * ((if (j == a) 1f else 0f) - probs[j]) + p.entropy * probs[j] * (ln(probs[j]) + h)
+                        val g = dlp * ((if (j == a) 1f else 0f) - probs[j]) + ec * probs[j] * (ln(probs[j]) + h)
                         dlog[j] = g * inv
                     }
                     pi.backward(dlog)
@@ -244,8 +281,15 @@ class SpeciesLearner(val sp: Int, val p: RlParams, cap: Int, private val rng: Rn
         }
         updates++
         val sn = max(1, seen)
+        lastReward = meanR.toFloat()
+        lastEntropy = (ent / sn).toFloat()
+        // fix 7: a brain that locked into one choice gets more curious again
+        if (p.adaptiveEntropy) {
+            entCoef = if (lastEntropy < p.entropyLow) min(p.entropyMax, entCoef * 1.5f)
+                else if (lastEntropy > p.entropyHigh) max(p.entropy, entCoef / 1.25f) else entCoef
+        }
         lastStats = "learn,$updates,${"%.4f".format(meanR)},${"%.4f".format(piLoss / sn)},${"%.4f".format(vLoss / sn)}," +
-            "${"%.3f".format(ent / sn)},${"%.4f".format(kl / sn)},${"%.3f".format(clipped.toFloat() / sn)},$m"
+            "${"%.3f".format(ent / sn)},${"%.4f".format(kl / sn)},${"%.3f".format(clipped.toFloat() / sn)},${"%.3f".format(ec)},$m"
 
         // keep the transitions still waiting for their next decision
         val remap = IntArray(n) { -1 }
@@ -276,73 +320,160 @@ class SpeciesLearner(val sp: Int, val p: RlParams, cap: Int, private val rng: Rn
 }
 
 /**
- * The learning brains of all three species. The world asks it what each creature should do,
- * and tells it what happened afterwards (reward). It learns while the world runs.
+ * The learning brains of all three species. Each species has one or more brain families (fix 15); every
+ * creature uses its family's brain, and its experience trains that brain. The world asks it what each
+ * creature should do and tells it what happened afterwards (reward). It learns while the world runs.
  */
-class RlBrain(val cap: Int, val p: RlParams = RlParams(), seed: Long = 1L) {
+class RlBrain(
+    val cap: Int,
+    val p: RlParams = RlParams(),
+    seed: Long = 1L,
+    val families: IntArray = intArrayOf(1, 1, 1),
+    val batches: IntArray = intArrayOf(p.batch, p.batch, p.batch),
+) {
     private val rng = Rng(seed xor 0x5DEECE66DL)
-    val learners = Array(NSP) { SpeciesLearner(it, p, p.batch + cap + 16, rng) }
+    /** First learner index of each species. */
+    val base = IntArray(NSP).also { var k = 0; for (s in 0 until NSP) { it[s] = k; k += families[s] } }
+    val learners: Array<SpeciesLearner> = run {
+        val list = ArrayList<SpeciesLearner>()
+        for (s in 0 until NSP) for (f in 0 until families[s]) list.add(SpeciesLearner(s, f, p, batches[s], batches[s] + cap + 16, rng))
+        list.toTypedArray()
+    }
+    val mateChoice = MateChoice(Rng(seed xor 0x2545F491L))
+
+    /** Reward and entropy over time, per species (all families together). */
+    val curves = Array(NSP) { LearnCurve() }
 
     /** false while the brains are still copying instincts, true once they act and learn on their own. */
     var learning = false
 
+    /** true: the brains only act and never change (used for the exam). */
+    var frozen = false
+
+    /** Exam scores per species (reward per decision in a fixed test world), one point per exam. */
+    val examCurves = Array(NSP) { LearnCurve(400) }
+
     private val pendIdx = IntArray(cap) { -1 }
     private val pendUid = IntArray(cap)
-    private val pendSp = IntArray(cap)
+    private val pendL = IntArray(cap)
     private var log: FileWriter? = null
     var currentTick = 0L
 
+    var logDir: File? = null
+        private set
+
+    fun learner(sp: Int, family: Int): SpeciesLearner = learners[base[sp] + family.coerceIn(0, families[sp] - 1)]
+
+    fun close() { log?.close(); log = null }
+
     fun logTo(dir: File) {
+        logDir = dir
         dir.mkdirs()
         val f = File(dir, "training.csv")
         val fresh = !f.exists() || f.length() == 0L
         log = FileWriter(f, true).also {
-            if (fresh) it.write("tick,species,phase,update,a,b,c,d,e,f,samples\n")
+            if (fresh) it.write("tick,species,family,phase,update,a,b,c,d,e,f,g,samples\n")
         }
     }
 
     /** A creature decides. [reward] is what it earned since its previous decision. */
-    fun act(slot: Int, uid: Int, sp: Int, o: FloatArray, m: BooleanArray, reward: Float): Int {
-        val L = learners[sp]
+    fun act(slot: Int, uid: Int, sp: Int, family: Int, o: FloatArray, m: BooleanArray, reward: Float): Int {
+        val li = base[sp] + family.coerceIn(0, families[sp] - 1)
+        val L = learners[li]
+        if (frozen) return L.sample(o, m)
         val v = L.valueOf(o)
         val prev = pendIdx[slot]
-        val hasPrev = prev >= 0 && pendUid[slot] == uid && pendSp[slot] == sp
+        val hasPrev = prev >= 0 && pendUid[slot] == uid && pendL[slot] == li
         if (hasPrev) L.close(prev, reward, v, false)
         val a = L.sample(o, m)
         val idx = L.add(o, m, a, ln(max(1e-8f, L.probOf(a))), v, slot)
         if (hasPrev) L.nextIdx[prev] = idx
-        pendIdx[slot] = idx; pendUid[slot] = uid; pendSp[slot] = sp
-        if (L.nComplete >= p.batch) {
+        pendIdx[slot] = idx; pendUid[slot] = uid; pendL[slot] = li
+        if (L.nComplete >= L.batch || L.count >= L.batch + cap) {
             val remap = L.update()
             for (s in 0 until cap) {
-                if (pendSp[s] == sp && pendIdx[s] >= 0) pendIdx[s] = if (pendIdx[s] < remap.size) remap[pendIdx[s]] else -1
+                if (pendL[s] == li && pendIdx[s] >= 0) pendIdx[s] = if (pendIdx[s] < remap.size) remap[pendIdx[s]] else -1
             }
-            writeLog(sp, L.lastStats)
+            curves[sp].add(currentTick, L.lastReward, L.lastEntropy)
+            writeLog(sp, family, L.lastStats)
         }
         return a
     }
 
-    /** Greedy choice without recording anything (used when learning is switched off). */
-    fun actGreedy(sp: Int, o: FloatArray, m: BooleanArray): Int = learners[sp].sample(o, m)
-
     fun death(slot: Int, uid: Int, reward: Float) {
+        if (frozen) return
         val prev = pendIdx[slot]
-        if (prev >= 0 && pendUid[slot] == uid) learners[pendSp[slot]].close(prev, reward, 0f, true)
+        if (prev >= 0 && pendUid[slot] == uid) learners[pendL[slot]].close(prev, reward, 0f, true)
         pendIdx[slot] = -1
     }
 
-    fun imitate(sp: Int, o: FloatArray, m: BooleanArray, label: Int) {
-        val L = learners[sp]
-        val before = L.bcUpdates
-        L.imitate(o, m, label)
-        if (L.bcUpdates != before) writeLog(sp, L.lastStats)
+    /** The creature moves to another brain family: its last decision is closed without a reward. */
+    fun handOver(slot: Int, uid: Int) {
+        val prev = pendIdx[slot]
+        if (prev >= 0 && pendUid[slot] == uid) {
+            val L = learners[pendL[slot]]
+            L.close(prev, 0f, L.value[prev], false)
+        }
+        pendIdx[slot] = -1
     }
 
-    private fun writeLog(sp: Int, stats: String) {
+    fun imitate(sp: Int, family: Int, o: FloatArray, m: BooleanArray, label: Int) {
+        val L = learner(sp, family)
+        val before = L.bcUpdates
+        L.imitate(o, m, label)
+        if (L.bcUpdates != before) writeLog(sp, family, L.lastStats)
+    }
+
+    /** Fix 15: family [dst] becomes a changed copy of family [src] of the same species. */
+    fun copyFamily(sp: Int, src: Int, dst: Int, noise: Float) {
+        val li = base[sp] + dst
+        learners[li].copyFrom(learners[base[sp] + src], noise)
+        dropPending(li)
+        writeLog(sp, dst, "copy_of,$src")
+    }
+
+    /** Fix 10: every brain of the species gets new random weights. */
+    fun resetSpecies(sp: Int) {
+        for (f in 0 until families[sp]) {
+            val li = base[sp] + f
+            learners[li].randomise()
+            dropPending(li)
+            writeLog(sp, f, "reset")
+        }
+    }
+
+    private fun dropPending(li: Int) {
+        for (s in 0 until cap) if (pendL[s] == li) pendIdx[s] = -1
+    }
+
+    /** Copies every weight from [o] (same layout), for the exam. */
+    fun copyWeightsFrom(o: RlBrain) {
+        for (k in learners.indices) {
+            learners[k].pi.copyFrom(o.learners[k].pi, Rng(1), 0f)
+            learners[k].vf.copyFrom(o.learners[k].vf, Rng(1), 0f)
+        }
+        for (s in 0 until NSP) System.arraycopy(o.mateChoice.w[s], 0, mateChoice.w[s], 0, MC_IN)
+        learning = true
+    }
+
+    @Synchronized
+    fun addExam(tick: Long, scores: FloatArray, meals: FloatArray) {
+        for (s in 0 until NSP) if (!scores[s].isNaN()) examCurves[s].add(tick, scores[s], meals[s])
+        for (s in 0 until NSP) if (!scores[s].isNaN()) writeLog(s, 0, "exam,${examCurves[s].n},${"%.4f".format(scores[s])},${"%.4f".format(meals[s])}")
+    }
+
+    fun logChoice(sp: Int, acceptRate: Float) {
+        val w = mateChoice.w[sp]
+        writeLog(sp, 0, "choice,${mateChoice.decisions},${"%.3f".format(acceptRate)},${"%.3f".format(mateChoice.avgSurvive[sp])}," +
+            "${"%.3f".format(w[MC_IN - 1])},${"%.3f".format(w[1])},${"%.3f".format(w[0])},${"%.3f".format(w[5])}")
+    }
+
+    @Synchronized
+    private fun writeLog(sp: Int, family: Int, stats: String) {
         val w = log ?: return
         val parts = stats.split(",")
-        val padded = (parts + List(10) { "" }).take(9)
-        w.write("$currentTick,${Species.all[sp].name},${padded.joinToString(",")}\n")
+        val padded = (parts + List(12) { "" }).take(10)
+        w.write("$currentTick,${Species.all[sp].name},$family,${padded.joinToString(",")}\n")
         w.flush()
     }
 
@@ -358,30 +489,40 @@ class RlBrain(val cap: Int, val p: RlParams = RlParams(), seed: Long = 1L) {
         file.absoluteFile.parentFile?.mkdirs()
         val tmp = File(file.path + ".tmp")
         DataOutputStream(BufferedOutputStream(tmp.outputStream())).use { o ->
-            o.writeInt(0x4252414E) // "BRAN"
+            o.writeInt(MAGIC)
             o.writeBoolean(learning)
+            for (s in 0 until NSP) o.writeInt(families[s])
             for (L in learners) {
-                o.writeInt(L.updates); o.writeInt(L.bcUpdates)
+                o.writeInt(L.updates); o.writeInt(L.bcUpdates); o.writeFloat(L.entCoef); o.writeInt(L.replaced)
                 L.pi.write(o); L.vf.write(o)
             }
+            mateChoice.write(o)
         }
         if (file.exists()) file.delete()
         tmp.renameTo(file)
     }
 
+    /** Returns false (and keeps random brains) if the file is missing or from a different brain layout. */
     fun load(file: File): Boolean {
         if (!file.exists()) return false
         return try {
             DataInputStream(BufferedInputStream(file.inputStream())).use { i ->
-                if (i.readInt() != 0x4252414E) return false
-                learning = i.readBoolean()
+                if (i.readInt() != MAGIC) return false
+                val wasLearning = i.readBoolean()
+                for (s in 0 until NSP) if (i.readInt() != families[s]) return false
                 for (L in learners) {
-                    L.updates = i.readInt(); L.bcUpdates = i.readInt()
+                    L.updates = i.readInt(); L.bcUpdates = i.readInt(); L.entCoef = i.readFloat(); L.replaced = i.readInt()
                     if (!L.pi.read(i) || !L.vf.read(i)) return false
                 }
+                mateChoice.read(i)
+                learning = wasLearning
             }
             resetPending()
             true
         } catch (e: Exception) { false }
+    }
+
+    private companion object {
+        const val MAGIC = 0x42524E32 // "BRN2"
     }
 }
