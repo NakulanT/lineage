@@ -472,3 +472,9 @@ Code is in this folder. Shared Kotlin simulation (`core`), shared screen (`ui`),
 - The creature arrays and the brains' buffers now grow when full instead of being fixed at the cap. Growing does not
   change the run (same seed, same world), and saves load at any size.
 - The caps are still settings (0 = off); old versions keep theirs. Details in `ANATOMY.md` section 14b.
+
+## 38. A colour for each brain family [Asked by the user: "different colors for a family group, differs same species with different capabilities"]
+- Each brain family is drawn in its own shade of its species' colour, so groups of one species with different evolved
+  brains (size, learning, motivations) can be told apart on the map. On by default; the **families** button or `C` turns it off.
+- The Evolution tab on the stats page shows each family in the same colour next to its genes.
+- Families only differ once the family checks have replaced a weak family with a changed copy (every 3,000 steps).

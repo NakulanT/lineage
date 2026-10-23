@@ -127,7 +127,10 @@ class StatsPage(private val scene: Scene) {
         for ((f, gn) in fg.withIndex()) {
             val members = fm?.getOrNull(f) ?: 0
             g.fillRoundRect(x, y, w, 46f * u, 8f * u, PANEL2)
-            g.text("Family ${f + 1}  ·  $members creatures", x + 10f * u, y + 17f * u, 12f * u, d.color, 0, true)
+            // the family's colour on the map (when "families" is on)
+            val fc = Art.palOf(s, f).base
+            g.fillCircle(x + 15f * u, y + 13f * u, 5f * u, fc)
+            g.text("Family ${f + 1}  ·  $members creatures", x + 26f * u, y + 17f * u, 12f * u, fc, 0, true)
             g.text(scene.menus.clipText(g, gn.describe(), 10.5f * u, w * 0.6f), x + w - 10f * u, y + 17f * u, 10.5f * u, TXT, 2)
             val top = (0 until NM).sortedByDescending { gn.motive[it] }
             val likes = top.take(2).joinToString(", ") { "${MOTIVE_NAMES[it]} x${"%.2f".format(gn.motive[it])}" }

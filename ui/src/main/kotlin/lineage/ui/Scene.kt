@@ -52,6 +52,8 @@ class Scene(val engine: SimEngine, val host: AppHost? = null) {
 
     /** 0 = population graph, 1 = learning graph. */
     var graphTab = 0
+    /** Each brain family in its own shade of the species' colour (see the stats page, Evolution tab, for what each family is). */
+    var familyColors = true
     /** Keep the selected creature in the middle of the screen. */
     var follow = false
 
@@ -164,7 +166,8 @@ class Scene(val engine: SimEngine, val host: AppHost? = null) {
             val sp = snap.sp[i].toInt()
             val hd = snap.ph[i] + wrap(snap.h[i] - snap.ph[i]) * ia
             val k = kPx * Art.bodyScale[sp] * snap.scale[i]
-            Art.draw(g, sp, sx, sy, hd, k, snap.walk[i], snap.flags[i].toInt(), t, (snap.uid[i] % 97).toFloat(), Art.detailFor(sp, k), snap.female[i])
+            val fam = if (familyColors && i < snap.family.size) snap.family[i].toInt() else 0
+            Art.draw(g, sp, sx, sy, hd, k, snap.walk[i], snap.flags[i].toInt(), t, (snap.uid[i] % 97).toFloat(), Art.detailFor(sp, k), snap.female[i], fam)
         }
 
         // ---- effects ----
@@ -348,7 +351,7 @@ class Scene(val engine: SimEngine, val host: AppHost? = null) {
             x += 14f * u
         }
         val info = "gen ${snap.maxGeneration}  day ${snap.tick / DAY_TICKS}  \u00b7  ${snap.brainLabel}"
-        if (x + g.measure(info, 12f * u) + 470f * u < w) g.text(info, x, bh / 2f + 12f * u * 0.35f, 12f * u, DIM)
+        if (x + g.measure(info, 12f * u) + 590f * u < w) g.text(info, x, bh / 2f + 12f * u * 0.35f, 12f * u, DIM)
         // speed button
         val label = when (snap.speed) { 0 -> "paused"; -1 -> "max"; else -> "${snap.speed}x" }
         val bw = 62f * u; val bhh = 26f * u
@@ -392,8 +395,16 @@ class Scene(val engine: SimEngine, val host: AppHost? = null) {
         g.fillRoundRect(hx, by, hw, bhh, 8f * u, PANEL2)
         g.text("?", hx + hw / 2f, by + bhh / 2f + 12f * u * 0.35f, 13f * u, TXT, 1, true)
         hit(hx, by, hw, bhh) { menus.show(OV_HELP) }
+        // colour by brain family: three dots in the shades of family 1-3 when on
+        val fLabel = "families"
+        val fw = g.measure(fLabel, 12f * u, true) + 42f * u
+        val fx = hx - fw - 8f * u
+        g.fillRoundRect(fx, by, fw, bhh, 8f * u, if (familyColors) 0xFF2F4F6B.toInt() else PANEL2)
+        for (f in 0 until 3) g.fillCircle(fx + 10f * u + f * 7f * u, by + bhh / 2f, 3f * u, if (familyColors) Art.palOf(2, f).base else DIM)
+        g.text(fLabel, fx + 30f * u, by + bhh / 2f + 12f * u * 0.35f, 12f * u, if (familyColors) TXT else DIM, 0, true)
+        hit(fx, by, fw, bhh) { familyColors = !familyColors }
         val sps = "${snap.stepsPerSecond.toInt()} steps/s"
-        g.text(sps, hx - 8f * u, bh / 2f + 10f * u * 0.35f, 10f * u, DIM, 2)
+        g.text(sps, fx - 8f * u, bh / 2f + 10f * u * 0.35f, 10f * u, DIM, 2)
     }
 
     /** One small row per species, each with its own scale, so a species with only a few members still shows. */

@@ -13,6 +13,46 @@ object Art {
         Pal(0xFF9A82F2.toInt(), 0xFF5A42C0.toInt(), 0xFFCDC0FB.toInt()), // Beta, violet
         Pal(0xFF4FA8F0.toInt(), 0xFF2A6CB0.toInt(), 0xFFAAD6FB.toInt()), // Gamma, sky blue
     )
+    /**
+     * Shades for the brain families of one species: family 1 keeps the species' colours, the others turn the hue a little
+     * or mix in white, so a family stands out and its species can still be told apart. Up to 8 families (then it repeats).
+     * Each entry: hue turn in degrees, white mixed in (negative = black).
+     */
+    private val familyShade = arrayOf(
+        floatArrayOf(0f, 0f), floatArrayOf(0f, 0.45f), floatArrayOf(24f, 0f), floatArrayOf(-24f, 0f),
+        floatArrayOf(0f, -0.3f), floatArrayOf(24f, 0.4f), floatArrayOf(-24f, 0.4f), floatArrayOf(0f, 0.7f),
+    )
+    /** Which way the first hue turn goes, away from the nearest other species: Beta toward purple, Gamma toward teal. */
+    private val hueAway = floatArrayOf(1f, 1f, -1f)
+    private val famPal = Array(pal.size) { s ->
+        Array(familyShade.size) { f ->
+            val dh = familyShade[f][0] * hueAway[s]; val mix = familyShade[f][1]
+            Pal(shade(pal[s].base, dh, mix), shade(pal[s].dark, dh, mix), shade(pal[s].light, dh, mix))
+        }
+    }
+
+    /** Colours of brain family [family] (0-based) of species [sp]. */
+    fun palOf(sp: Int, family: Int): Pal = famPal[sp][family.coerceAtLeast(0) % familyShade.size]
+
+    /** [c] with its hue turned by [dh] degrees, then mixed with white ([mix] > 0) or black ([mix] < 0). */
+    private fun shade(c: Int, dh: Float, mix: Float): Int {
+        var r = ((c shr 16) and 0xFF) / 255f; var g = ((c shr 8) and 0xFF) / 255f; var b = (c and 0xFF) / 255f
+        if (dh != 0f) {
+            // turn the hue by rotating the colour around the grey axis (keeps brightness about the same)
+            val a = Math.toRadians(dh.toDouble())
+            val cs = Math.cos(a).toFloat(); val sn = Math.sin(a).toFloat()
+            val k = (1f - cs) / 3f; val q = 0.57735f * sn
+            val nr = r * (cs + k) + g * (k - q) + b * (k + q)
+            val ng = r * (k + q) + g * (cs + k) + b * (k - q)
+            val nb = r * (k - q) + g * (k + q) + b * (cs + k)
+            r = nr; g = ng; b = nb
+        }
+        val t = if (mix >= 0f) 1f else 0f
+        val m = kotlin.math.abs(mix)
+        fun ch(v: Float) = ((v + (t - v) * m).coerceIn(0f, 1f) * 255f + 0.5f).toInt()
+        return (0xFF shl 24) or (ch(r) shl 16) or (ch(g) shl 8) or ch(b)
+    }
+
     val bodyScale = floatArrayOf(0.95f, 0.85f, 0.6f)
     /** Half the body length of each creature, in art units (before [bodyScale]). */
     private val bodyR = floatArrayOf(11.6f, 8.8f, 5.2f)
@@ -57,8 +97,10 @@ object Art {
     fun draw(
         g: Gfx, sp: Int, sx: Float, sy: Float, heading: Float, k: Float,
         walk: Float, flags: Int, t: Float, seed: Float, detail: Int, female: Boolean,
+        /** Brain family to colour by, or 0 for the species' own colours. */
+        family: Int = 0,
     ) {
-        val p = pal[sp]
+        val p = palOf(sp, family)
         if (detail <= 1) {
             val r = (if (sp == 0) 8f else if (sp == 1) 6f else 5f) * k
             g.fillCircle(sx, sy, maxOf(r, 1.6f), p.base)

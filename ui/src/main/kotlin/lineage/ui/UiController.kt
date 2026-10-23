@@ -35,6 +35,8 @@ class UiController(val scene: Scene) {
 
     fun toggleGraph() { scene.graphTab = 1 - scene.graphTab }
 
+    fun toggleFamilyColors() { scene.familyColors = !scene.familyColors }
+
     /** true while a number is being typed into the settings screen (keys go there, not to shortcuts). */
     fun typing(): Boolean = scene.menus.typing
     fun typeChar(c: Char) = scene.menus.type(c)

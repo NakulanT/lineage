@@ -629,7 +629,7 @@ class Menus(private val scene: Scene) {
             "" to "\"stats\" in the top bar (key T) shows, per species, whether its brains are improving: exam scores, live reward, curiosity, population, what the brains choose, and how they die.",
             "" to "\"Compare\" draws the learning of every version on the same chart, so you can see which settings learn best.",
             "KEYS (laptop)" to "",
-            "" to "Space pause · [ and ] slower / faster · F fit · + / − zoom · V versions · T stats · L learning graph · H help · S save · Esc close",
+            "" to "Space pause · [ and ] slower / faster · F fit · + / − zoom · V versions · T stats · L learning graph · C family colours · H help · S save · Esc close",
         )
         for ((head, body) in lines) {
             if (head.isNotEmpty()) {

@@ -74,7 +74,7 @@ carries on from it. Add `--fresh` to start a new version from the command line:
 
 Controls: drag to move; zoom with the trackpad / mouse wheel, `+` / `-`, or the on-screen `+` `−` `fit` buttons;
 click a creature to inspect it; click a plant to see its scent range; double-click or `F` to fit the map;
-`Space` pause, `[` / `]` slower / faster, `V` versions, `T` stats, `L` population / learning graph, `H` help, `S` save now,
+`Space` pause, `[` / `]` slower / faster, `V` versions, `T` stats, `L` population / learning graph, `C` family colours, `H` help, `S` save now,
 `Esc` close. The button at the top right cycles 1x / 5x / 20x / max / paused. `?` shows the help on screen.
 Tap `follow` in a creature's panel to keep it in view.
 

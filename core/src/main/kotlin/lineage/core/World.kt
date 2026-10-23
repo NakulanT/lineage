@@ -1878,13 +1878,13 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
         val suid = IntArray(n); val ssp = ByteArray(n); val sfem = BooleanArray(n)
         val sx = FloatArray(n); val sy = FloatArray(n); val spx = FloatArray(n); val spy = FloatArray(n)
         val sh = FloatArray(n); val sph = FloatArray(n); val sscale = FloatArray(n); val swalk = FloatArray(n)
-        val sflags = ByteArray(n)
+        val sflags = ByteArray(n); val sfam = ByteArray(n)
         var k = 0
         var selSlot = -1
         for (i in 0 until cap) {
             if (!alive[i]) continue
             if (k >= n) break
-            suid[k] = uid[i]; ssp[k] = sp[i]; sfem[k] = female[i]
+            suid[k] = uid[i]; ssp[k] = sp[i]; sfem[k] = female[i]; sfam[k] = family[i]
             sx[k] = x[i]; sy[k] = y[i]; spx[k] = px[i]; spy[k] = py[i]
             sh[k] = h[i]; sph[k] = ph[i]
             sscale[k] = (0.55f + 0.45f * min(1f, age[i].toFloat() / def(i).maturityTicks)) * (if (female[i]) 0.94f else 1.06f)
@@ -1910,6 +1910,7 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
             fxt, fxx, fxy, nfx, if (selSlot >= 0) selectedInfo(selSlot) else null,
         ).also {
             it.brainLabel = brain?.label() ?: "instincts"
+            it.family = sfam
             it.shelterX = shX.copyOf(nSh); it.shelterY = shY.copyOf(nSh)
             it.rescues = rescues; it.topUps = topUps; it.brainResets = brainResets; it.familyCopies = familyCopies
             it.actions = Array(NSP) { s -> actRecent[s].copyOf() }

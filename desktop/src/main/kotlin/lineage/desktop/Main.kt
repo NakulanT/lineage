@@ -118,6 +118,7 @@ class SimPanel(private var scene: Scene, private var ui: UiController) : JPanel(
                     KeyEvent.VK_V -> ui.toggleMenu(OV_VERSIONS)
                     KeyEvent.VK_H -> ui.toggleMenu(OV_HELP)
                     KeyEvent.VK_L -> ui.toggleGraph()
+                    KeyEvent.VK_C -> ui.toggleFamilyColors()
                     KeyEvent.VK_T -> ui.toggleMenu(OV_STATS)
                     KeyEvent.VK_EQUALS, KeyEvent.VK_PLUS, KeyEvent.VK_ADD -> ui.zoomIn(width.toFloat(), height.toFloat())
                     KeyEvent.VK_MINUS, KeyEvent.VK_SUBTRACT -> ui.zoomOut(width.toFloat(), height.toFloat())
@@ -336,13 +337,16 @@ fun runVersions(cfg: SimConfig, opts: Map<String, String>) {
         if (opts.containsKey("select")) for (i in 0 until world.cap) if (world.alive[i] && world.sp[i].toInt() == (opts["select"]?.toIntOrNull() ?: 2) && !world.isInfant(i)) { session.engine.selectedUid = world.uid[i]; break }
         if (opts["menu"] == "brain") scene.menus.show(lineage.ui.OV_BRAIN)
         opts["statsTab"]?.let { scene.menus.statsTab(it.toInt()) }
+        if (opts["families"] == "off") scene.familyColors = false
         opts["newTab"]?.let { scene.menus.editFrom(null); scene.menus.newTabIndex(it.toInt()) }
         when (opts["menu"]) { "versions" -> scene.menus.show(OV_VERSIONS); "new" -> scene.menus.editFrom(null); "compare" -> scene.menus.show(OV_COMPARE); "help" -> scene.menus.show(OV_HELP) }
         session.engine.speed = 0
         session.engine.publishNow()
         val img = BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB)
         val gfx = AwtGfx()
-        repeat(2) {
+        repeat(2) { pass ->
+            // the first frame measures the open window, so --scroll N can scroll it before the second
+            if (pass == 1) opts["scroll"]?.let { scene.menus.scrollBy(it.toFloat()) }
             val g2 = img.createGraphics()
             gfx.begin(g2, w.toFloat(), h.toFloat())
             scene.draw(gfx, System.nanoTime())

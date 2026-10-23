@@ -153,6 +153,10 @@ Default is 0, so the world starts from random brains.
   (if it has at least 4), with a small random change to every weight (2%). A few members of the big family move over
   so the new copy gets tried out.
 - So brains are both trained (PPO, during life) and selected (families whose creatures survive and breed spread).
+- **On screen each family has its own shade** of the species' colour (the **families** button in the top bar, or `C`):
+  family 1 keeps the species' colour, family 2 is paler, family 3 turns the hue away from the nearest other species
+  (Alpha yellower, Beta more purple, Gamma teal), and so on up to 8. The stats page, Evolution tab, shows each family
+  in its colour next to its genes, so you can see which group on the map has which brain size and motivations.
 
 ### 3.10 The exam (is it really learning?)
 The live reward also moves with food and crowding, so it is not a fair test on its own. Every 10,000 steps, a

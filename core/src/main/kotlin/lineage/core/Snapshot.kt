@@ -120,6 +120,8 @@ class RenderSnapshot(
     var familyGenes: Array<Array<lineage.core.rl.BrainGenes>>? = null
     /** Species-wide feature attribution and neuron behaviour. */
     var brainStats: lineage.core.rl.BrainStats? = null
+    /** Brain family of each creature (same order as [uid]), so the viewer can colour the families. */
+    var family: ByteArray = ByteArray(0)
     /** Where the shelters are now (they move). */
     var shelterX: FloatArray = FloatArray(0)
     var shelterY: FloatArray = FloatArray(0)
