@@ -56,9 +56,15 @@ class RlParams(
 )
 
 /** One brain: a policy network, a value network, and the experience gathered for learning. */
-class SpeciesLearner(val sp: Int, val family: Int, val p: RlParams, val batch: Int, cap: Int, private val rng: Rng) {
-    val pi = Mlp(IntArray(p.layers + 2) { if (it == 0) OBS else if (it == p.layers + 1) NA else p.hidden }, rng, 0.01f)
-    val vf = Mlp(IntArray(p.layers + 2) { if (it == 0) OBS else if (it == p.layers + 1) 1 else p.hidden }, rng, 1f)
+class SpeciesLearner(
+    val sp: Int, val family: Int, val p: RlParams, val batch: Int, cap: Int, private val rng: Rng,
+    /** Brain size, learning settings and motivations of this family (they evolve when families are copied). */
+    var genes: BrainGenes = BrainGenes.of(p),
+) {
+    var pi = Mlp(shape(genes, NA), rng, 0.01f); private set
+    var vf = Mlp(shape(genes, 1), rng, 1f); private set
+    /** Step at which this family got its current brain (a new copy is not judged straight away). */
+    var bornTick = 0L
 
     // experience buffer (PPO)
     private val capacity = cap
@@ -88,7 +94,7 @@ class SpeciesLearner(val sp: Int, val family: Int, val p: RlParams, val batch: I
     var bcUpdates = 0
     var lastStats = ""
     /** Current entropy bonus (changes when [RlParams.adaptiveEntropy] is on). */
-    var entCoef = p.entropy
+    var entCoef = genes.entropy
     var lastReward = 0f
     var lastEntropy = 0f
     /** Times this brain was replaced by a copy of a better family or reset. */
@@ -98,9 +104,20 @@ class SpeciesLearner(val sp: Int, val family: Int, val p: RlParams, val batch: I
     private val dlog = FloatArray(NA)
     private val dv = FloatArray(1)
 
+    /** Scratch numbers of one piece of a parallel training step. */
+    private class Piece {
+        val probs = FloatArray(NA)
+        val dlog = FloatArray(NA)
+        val dv = FloatArray(1)
+        var piLoss = 0.0; var vLoss = 0.0; var ent = 0.0; var kl = 0.0; var clipped = 0; var seen = 0
+    }
+    private val pieces = Array(Par.PIECES) { Piece() }
+
     /** Masked softmax of the policy for one observation; result in [out]. */
-    fun probsFor(o: FloatArray, oOff: Int, m: BooleanArray, mOff: Int, out: FloatArray) {
-        val logits = pi.forward(o, oOff)
+    fun probsFor(o: FloatArray, oOff: Int, m: BooleanArray, mOff: Int, out: FloatArray) = probsFor(o, oOff, m, mOff, out, null)
+
+    private fun probsFor(o: FloatArray, oOff: Int, m: BooleanArray, mOff: Int, out: FloatArray, pass: Mlp.Pass?) {
+        val logits = if (pass == null) pi.forward(o, oOff) else pi.forward(o, oOff, pass)
         var mx = Float.NEGATIVE_INFINITY
         for (a in 0 until NA) if (m[mOff + a] && logits[a] > mx) mx = logits[a]
         var sum = 0f
@@ -145,18 +162,39 @@ class SpeciesLearner(val sp: Int, val family: Int, val p: RlParams, val batch: I
     /** Throws away the gathered experience (after the weights were replaced). */
     fun clearBuffer() { count = 0; nComplete = 0; bcN = 0 }
 
-    /** Becomes a changed copy of [o] (brain evolution). */
-    fun copyFrom(o: SpeciesLearner, noise: Float) {
-        pi.copyFrom(o.pi, rng, noise); vf.copyFrom(o.vf, rng, noise)
-        entCoef = o.entCoef
+    /**
+     * Becomes a changed copy of [o] (brain evolution). With [newGenes] (changed genes of [o]) the brain also takes the
+     * new size, growing or shrinking [o]'s brain while keeping what it learned.
+     */
+    fun copyFrom(o: SpeciesLearner, noise: Float, newGenes: BrainGenes? = null) {
+        val g = newGenes ?: o.genes
+        val srcPi = if (o.genes.hidden == g.hidden && o.genes.layers == g.layers) o.pi else o.pi.resized(shape(g, NA), rng, 0.01f)
+        val srcVf = if (o.genes.hidden == g.hidden && o.genes.layers == g.layers) o.vf else o.vf.resized(shape(g, 1), rng, 1f)
+        if (!pi.sizes.contentEquals(srcPi.sizes)) pi = Mlp(srcPi.sizes.copyOf(), rng, 0.01f)
+        if (!vf.sizes.contentEquals(srcVf.sizes)) vf = Mlp(srcVf.sizes.copyOf(), rng, 1f)
+        pi.copyFrom(srcPi, rng, noise); vf.copyFrom(srcVf, rng, noise)
+        genes = g.copy()
+        entCoef = o.entCoef.coerceIn(genes.entropy, max(genes.entropy, p.entropyMax))
         clearBuffer()
         replaced++
     }
 
-    /** New random weights (fix 10). */
+    /** An exact copy of [o]: same genes, same shape, same weights (for the exam). */
+    fun copyExact(o: SpeciesLearner) {
+        genes = o.genes.copy()
+        if (!pi.sizes.contentEquals(o.pi.sizes)) pi = Mlp(o.pi.sizes.copyOf(), rng, 0.01f)
+        if (!vf.sizes.contentEquals(o.vf.sizes)) vf = Mlp(o.vf.sizes.copyOf(), rng, 1f)
+        pi.copyFrom(o.pi, rng, 0f); vf.copyFrom(o.vf, rng, 0f)
+        entCoef = o.entCoef
+    }
+
+    /** Takes a loaded brain (from a save) with its genes. */
+    fun setBrain(g: BrainGenes, newPi: Mlp, newVf: Mlp) { genes = g; pi = newPi; vf = newVf; clearBuffer() }
+
+    /** New random weights (fix 10). Keeps its genes. */
     fun randomise() {
         pi.randomise(rng, 0.01f); vf.randomise(rng, 1f)
-        entCoef = p.entropy
+        entCoef = genes.entropy
         clearBuffer()
         replaced++
     }
@@ -215,12 +253,13 @@ class SpeciesLearner(val sp: Int, val family: Int, val p: RlParams, val batch: I
     /** Learns from the finished part of the buffer. Returns the new index of every kept transition (or -1). */
     fun update(): IntArray {
         val n = count
+        val gamma = genes.gamma
         for (t in n - 1 downTo 0) {
             if (!complete[t]) continue
-            val delta = rew[t] + p.gamma * nextV[t] * (if (done[t]) 0f else 1f) - value[t]
+            val delta = rew[t] + gamma * nextV[t] * (if (done[t]) 0f else 1f) - value[t]
             var a = delta
             val nx = nextIdx[t]
-            if (!done[t] && nx in 0 until n && complete[nx]) a += p.gamma * p.lambda * adv[nx]
+            if (!done[t] && nx in 0 until n && complete[nx]) a += gamma * p.lambda * adv[nx]
             adv[t] = a
             ret[t] = a + value[t]
         }
@@ -247,37 +286,52 @@ class SpeciesLearner(val sp: Int, val family: Int, val p: RlParams, val batch: I
             while (s < m) {
                 val e = minOf(m, s + p.minibatch)
                 val inv = 1f / (e - s)
-                pi.zeroGrad(); vf.zeroGrad()
-                for (q in s until e) {
-                    val t = idx[q]
-                    probsFor(obs, t * OBS, mask, t * NA, probs)
-                    val a = act[t]
-                    val lpNew = ln(max(1e-8f, probs[a]))
-                    val ratio = exp(lpNew - logp[t])
-                    val A = adv[t]
-                    val isClipped = (A >= 0 && ratio > 1 + p.clip) || (A < 0 && ratio < 1 - p.clip)
-                    val dlp = if (isClipped) 0f else -A * ratio
-                    var h = 0f
-                    for (j in 0 until NA) if (probs[j] > 0f) h -= probs[j] * ln(probs[j])
-                    for (j in 0 until NA) {
-                        if (!mask[t * NA + j] || probs[j] <= 0f) { dlog[j] = 0f; continue }
-                        val g = dlp * ((if (j == a) 1f else 0f) - probs[j]) + ec * probs[j] * (ln(probs[j]) + h)
-                        dlog[j] = g * inv
+                // the minibatch is cut into fixed pieces that run on several cores; their gradients are added in order
+                val per = (e - s + Par.PIECES - 1) / Par.PIECES
+                val nPieces = (e - s + per - 1) / per
+                val start = s
+                Par.run(nPieces) { k ->
+                    val pc = pieces[k]
+                    val pp = pi.piece(k); val vp = vf.piece(k)
+                    pi.zeroGrad(pp); vf.zeroGrad(vp)
+                    val probs = pc.probs; val dlog = pc.dlog; val dv = pc.dv
+                    for (q in start + k * per until minOf(e, start + (k + 1) * per)) {
+                        val t = idx[q]
+                        probsFor(obs, t * OBS, mask, t * NA, probs, pp)
+                        val a = act[t]
+                        val lpNew = ln(max(1e-8f, probs[a]))
+                        val ratio = exp(lpNew - logp[t])
+                        val A = adv[t]
+                        val isClipped = (A >= 0 && ratio > 1 + p.clip) || (A < 0 && ratio < 1 - p.clip)
+                        val dlp = if (isClipped) 0f else -A * ratio
+                        var h = 0f
+                        for (j in 0 until NA) if (probs[j] > 0f) h -= probs[j] * ln(probs[j])
+                        for (j in 0 until NA) {
+                            if (!mask[t * NA + j] || probs[j] <= 0f) { dlog[j] = 0f; continue }
+                            val g = dlp * ((if (j == a) 1f else 0f) - probs[j]) + ec * probs[j] * (ln(probs[j]) + h)
+                            dlog[j] = g * inv
+                        }
+                        pi.backward(dlog, pp, false)
+                        val v = vf.forward(obs, t * OBS, vp)[0]
+                        dv[0] = (v - ret[t]) * inv
+                        vf.backward(dv, vp, false)
+                        pc.piLoss += -minOf(ratio * A, (if (A >= 0) minOf(ratio, 1 + p.clip) else max(ratio, 1 - p.clip)) * A)
+                        pc.vLoss += 0.5 * (v - ret[t]) * (v - ret[t])
+                        pc.ent += h; pc.kl += logp[t] - lpNew
+                        if (isClipped) pc.clipped++
+                        pc.seen++
                     }
-                    pi.backward(dlog)
-                    val v = vf.forward(obs, t * OBS)[0]
-                    dv[0] = (v - ret[t]) * inv
-                    vf.backward(dv)
-                    piLoss += -minOf(ratio * A, (if (A >= 0) minOf(ratio, 1 + p.clip) else max(ratio, 1 - p.clip)) * A)
-                    vLoss += 0.5 * (v - ret[t]) * (v - ret[t])
-                    ent += h; kl += logp[t] - lpNew
-                    if (isClipped) clipped++
-                    seen++
                 }
+                pi.zeroGrad(); vf.zeroGrad()
+                for (k in 0 until nPieces) { pi.addGrad(pi.piece(k)); vf.addGrad(vf.piece(k)) }
                 pi.clipGrad(p.maxGrad); vf.clipGrad(p.maxGrad)
-                pi.adam(p.lr); vf.adam(p.lr * 3f)
+                pi.adam(genes.lr); vf.adam(genes.lr * 3f)
                 s = e
             }
+        }
+        for (pc in pieces) {
+            piLoss += pc.piLoss; vLoss += pc.vLoss; ent += pc.ent; kl += pc.kl; clipped += pc.clipped; seen += pc.seen
+            pc.piLoss = 0.0; pc.vLoss = 0.0; pc.ent = 0.0; pc.kl = 0.0; pc.clipped = 0; pc.seen = 0
         }
         updates++
         val sn = max(1, seen)
@@ -286,7 +340,7 @@ class SpeciesLearner(val sp: Int, val family: Int, val p: RlParams, val batch: I
         // fix 7: a brain that locked into one choice gets more curious again
         if (p.adaptiveEntropy) {
             entCoef = if (lastEntropy < p.entropyLow) min(p.entropyMax, entCoef * 1.5f)
-                else if (lastEntropy > p.entropyHigh) max(p.entropy, entCoef / 1.25f) else entCoef
+                else if (lastEntropy > p.entropyHigh) max(genes.entropy, entCoef / 1.25f) else entCoef
         }
         lastStats = "learn,$updates,${"%.4f".format(meanR)},${"%.4f".format(piLoss / sn)},${"%.4f".format(vLoss / sn)}," +
             "${"%.3f".format(ent / sn)},${"%.4f".format(kl / sn)},${"%.3f".format(clipped.toFloat() / sn)},${"%.3f".format(ec)},$m"
@@ -316,6 +370,11 @@ class SpeciesLearner(val sp: Int, val family: Int, val p: RlParams, val batch: I
             val j = rng.nextInt(i + 1)
             val t = a[i]; a[i] = a[j]; a[j] = t
         }
+    }
+
+    companion object {
+        /** Layer sizes of a network with these genes: senses in, [out] numbers out. */
+        fun shape(g: BrainGenes, out: Int) = IntArray(g.layers + 2) { if (it == 0) OBS else if (it == g.layers + 1) out else g.hidden }
     }
 }
 
@@ -357,6 +416,7 @@ class RlBrain(
     private val pendUid = IntArray(cap)
     private val pendL = IntArray(cap)
     private var log: FileWriter? = null
+    private var genesLog: FileWriter? = null
     var currentTick = 0L
 
     var logDir: File? = null
@@ -364,7 +424,7 @@ class RlBrain(
 
     fun learner(sp: Int, family: Int): SpeciesLearner = learners[base[sp] + family.coerceIn(0, families[sp] - 1)]
 
-    fun close() { log?.close(); log = null }
+    fun close() { log?.close(); log = null; genesLog?.close(); genesLog = null }
 
     fun logTo(dir: File) {
         logDir = dir
@@ -374,6 +434,20 @@ class RlBrain(
         log = FileWriter(f, true).also {
             if (fresh) it.write("tick,species,family,phase,update,a,b,c,d,e,f,g,samples\n")
         }
+        val gf = File(dir, "brain_genes.csv")
+        val gFresh = !gf.exists() || gf.length() == 0L
+        genesLog = FileWriter(gf, true).also { if (gFresh) it.write(GENES_HEADER + "\n") }
+    }
+
+    /** One row per brain family: its members now and its genes (brain_genes.csv, fix 19 charts). */
+    fun logGenes(tick: Long, sp: Int, members: IntArray) {
+        val w = genesLog ?: return
+        for (f in 0 until families[sp]) {
+            val g = learner(sp, f).genes
+            w.write("$tick,${Species.all[sp].name},$f,${members.getOrElse(f) { 0 }},${g.hidden},${g.layers},${"%.6f".format(g.lr)}," +
+                "${"%.4f".format(g.entropy)},${"%.5f".format(g.gamma)},${g.motive.joinToString(",") { "%.3f".format(it) }}\n")
+        }
+        w.flush()
     }
 
     /** A creature decides. [reward] is what it earned since its previous decision. */
@@ -424,10 +498,14 @@ class RlBrain(
         if (L.bcUpdates != before) writeLog(sp, family, L.lastStats)
     }
 
-    /** Fix 15: family [dst] becomes a changed copy of family [src] of the same species. */
-    fun copyFamily(sp: Int, src: Int, dst: Int, noise: Float) {
+    /**
+     * Fix 15: family [dst] becomes a changed copy of family [src] of the same species. With [genes] (changed genes of
+     * [src], fix 19) it also takes the new brain size, learning settings and motivations.
+     */
+    fun copyFamily(sp: Int, src: Int, dst: Int, noise: Float, genes: BrainGenes? = null) {
         val li = base[sp] + dst
-        learners[li].copyFrom(learners[base[sp] + src], noise)
+        learners[li].copyFrom(learners[base[sp] + src], noise, genes)
+        learners[li].bornTick = currentTick
         dropPending(li)
         writeLog(sp, dst, "copy_of,$src")
     }
@@ -446,12 +524,9 @@ class RlBrain(
         for (s in 0 until cap) if (pendL[s] == li) pendIdx[s] = -1
     }
 
-    /** Copies every weight from [o] (same layout), for the exam. */
+    /** Copies every brain from [o] (same families; sizes may differ), for the exam. */
     fun copyWeightsFrom(o: RlBrain) {
-        for (k in learners.indices) {
-            learners[k].pi.copyFrom(o.learners[k].pi, Rng(1), 0f)
-            learners[k].vf.copyFrom(o.learners[k].vf, Rng(1), 0f)
-        }
+        for (k in learners.indices) learners[k].copyExact(o.learners[k])
         for (s in 0 until NSP) System.arraycopy(o.mateChoice.w[s], 0, mateChoice.w[s], 0, MC_IN)
         learning = true
     }
@@ -494,6 +569,7 @@ class RlBrain(
             for (s in 0 until NSP) o.writeInt(families[s])
             for (L in learners) {
                 o.writeInt(L.updates); o.writeInt(L.bcUpdates); o.writeFloat(L.entCoef); o.writeInt(L.replaced)
+                L.genes.write(o); o.writeLong(L.bornTick)
                 L.pi.write(o); L.vf.write(o)
             }
             mateChoice.write(o)
@@ -507,12 +583,19 @@ class RlBrain(
         if (!file.exists()) return false
         return try {
             DataInputStream(BufferedInputStream(file.inputStream())).use { i ->
-                if (i.readInt() != MAGIC) return false
+                val magic = i.readInt()
+                if (magic != MAGIC && magic != MAGIC_V2) return false
                 val wasLearning = i.readBoolean()
                 for (s in 0 until NSP) if (i.readInt() != families[s]) return false
                 for (L in learners) {
                     L.updates = i.readInt(); L.bcUpdates = i.readInt(); L.entCoef = i.readFloat(); L.replaced = i.readInt()
-                    if (!L.pi.read(i) || !L.vf.read(i)) return false
+                    if (magic == MAGIC) {
+                        // each family's brain has its own size (fix 19)
+                        val g = BrainGenes.read(i); L.bornTick = i.readLong()
+                        val newPi = Mlp.readAny(i, rng, 0.01f); val newVf = Mlp.readAny(i, rng, 1f)
+                        if (newPi.sizes.first() != OBS || newPi.sizes.last() != NA || newVf.sizes.first() != OBS) return false
+                        L.setBrain(g, newPi, newVf)
+                    } else if (!L.pi.read(i) || !L.vf.read(i)) return false
                 }
                 mateChoice.read(i)
                 learning = wasLearning
@@ -522,7 +605,10 @@ class RlBrain(
         } catch (e: Exception) { false }
     }
 
-    private companion object {
-        const val MAGIC = 0x42524E32 // "BRN2"
+    companion object {
+        private const val MAGIC_V2 = 0x42524E32 // "BRN2"
+        private const val MAGIC = 0x42524E33 // "BRN3": adds the genes of each brain family (fix 19)
+        const val GENES_HEADER = "tick,species,family,members,hidden,layers,learning_rate,curiosity,gamma," +
+            "m_food,m_mating,m_babies_grow_up,m_avoid_hurt,m_avoid_hunger,m_exploring,m_avoid_death"
     }
 }

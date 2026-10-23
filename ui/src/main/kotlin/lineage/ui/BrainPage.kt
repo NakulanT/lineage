@@ -36,7 +36,9 @@ class BrainPage(private val scene: Scene) {
         val d = Species.all[v.species]
         g.text("${d.name} ${sel.label}  ·  brain family ${v.family + 1}  ·  chose \"${ACTION_NAMES[v.chosen]}\" (${(v.probs[v.chosen] * 100).toInt()}% chance)",
             x, y + 14f * u, 13f * u, d.color, 0, true)
-        y += 24f * u
+        y += 20f * u
+        g.text(scene.menus.clipText(g, "brain genes: ${v.genes.describe()}", 10.5f * u, w), x, y + 11f * u, 10.5f * u, DIM)
+        y += 18f * u
 
         // why: top reasons
         val reasons = BrainProbe.reasons(v, 5)

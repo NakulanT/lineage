@@ -66,10 +66,12 @@ class SimPanel(private var scene: Scene, private var ui: UiController) : JPanel(
         isFocusable = true
         val m = object : MouseAdapter() {
             override fun mousePressed(e: MouseEvent) {
+                touched()
                 requestFocusInWindow()
                 lastX = e.x; lastY = e.y; downX = e.x; downY = e.y; dragged = false
             }
             override fun mouseDragged(e: MouseEvent) {
+                touched()
                 if (abs(e.x - downX) + abs(e.y - downY) > 4) dragged = true
                 ui.pan((e.x - lastX).toFloat(), (e.y - lastY).toFloat())
                 lastX = e.x; lastY = e.y
@@ -81,14 +83,16 @@ class SimPanel(private var scene: Scene, private var ui: UiController) : JPanel(
                 }
             }
             override fun mouseWheelMoved(e: MouseWheelEvent) {
+                touched()
                 ui.wheel(e.preciseWheelRotation.toFloat(), e.x.toFloat(), e.y.toFloat(), width.toFloat(), height.toFloat())
             }
         }
         addMouseListener(m); addMouseMotionListener(m); addMouseWheelListener(m)
         addMouseMotionListener(object : java.awt.event.MouseMotionAdapter() {
-            override fun mouseMoved(e: MouseEvent) { lastX = e.x; lastY = e.y }
+            override fun mouseMoved(e: MouseEvent) { lastX = e.x; lastY = e.y; touched() }
         })
         installMacPinch(this) { mag ->
+            touched()
             ui.zoom(1f + mag, lastX.toFloat(), lastY.toFloat(), width.toFloat(), height.toFloat())
         }
         addKeyListener(object : KeyAdapter() {
@@ -97,6 +101,7 @@ class SimPanel(private var scene: Scene, private var ui: UiController) : JPanel(
             }
 
             override fun keyPressed(e: KeyEvent) {
+                touched()
                 if (ui.typing()) {
                     when (e.keyCode) {
                         KeyEvent.VK_ENTER -> ui.typeEnter()
@@ -136,11 +141,34 @@ class SimPanel(private var scene: Scene, private var ui: UiController) : JPanel(
         ui = UiController(s)
     }
 
+    private var paintNanos = 0L
+    private var lastPaint = 0L
+    private var input = 0L
+
     override fun paintComponent(g: Graphics) {
         super.paintComponent(g)
         gfx.begin(g as Graphics2D, width.toFloat(), height.toFloat())
-        scene.draw(gfx, System.nanoTime())
+        val t0 = System.nanoTime()
+        scene.draw(gfx, t0)
+        val end = System.nanoTime()
+        paintNanos = (paintNanos * 3 + (end - t0)) / 4
+        lastPaint = end
     }
+
+    /**
+     * Called about 60 times a second. Draws a new frame only when the last one had time to finish, so drawing never
+     * takes more than about two thirds of the window's thread and clicks, keys and zooming always get through.
+     * While paused and untouched, it draws 15 frames a second.
+     */
+    fun tick() {
+        val now = System.nanoTime()
+        val paused = scene.engine.speed == 0 && now - input > 1_000_000_000L
+        val gap = maxOf(if (paused) 66_000_000L else 15_000_000L, paintNanos * 3 / 2)
+        if (now - lastPaint >= gap) repaint()
+    }
+
+    /** Marks that the viewer did something, so the next frames come at full rate. */
+    private fun touched() { input = System.nanoTime() }
 }
 
 /** Mac trackpad pinch-to-zoom. Uses the JDK's Mac gesture hook when it is there; does nothing elsewhere. */
@@ -282,7 +310,7 @@ fun main(args: Array<String>) {
         Runtime.getRuntime().addShutdownHook(Thread { try { engine.stop(); history.close() } catch (_: Exception) { } })
         frame.isVisible = true
         engine.start()
-        Timer(16) { panel.repaint() }.start()
+        Timer(16) { panel.tick() }.start()
         println("History and saves are in: ${outDir.absolutePath}")
     }
 }
@@ -351,7 +379,7 @@ fun runVersions(cfg: SimConfig, opts: Map<String, String>) {
         Runtime.getRuntime().addShutdownHook(Thread { shutdown() })
         frame.isVisible = true
         session.engine.start()
-        Timer(16) { panel.repaint() }.start()
+        Timer(16) { panel.tick() }.start()
         println("Running ${session.name}. Versions are kept in: ${root.absolutePath}")
     }
 }

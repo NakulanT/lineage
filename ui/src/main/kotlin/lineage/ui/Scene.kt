@@ -155,7 +155,6 @@ class Scene(val engine: SimEngine, val host: AppHost? = null) {
         if (sel != null && sel.alive) drawSenses(g, sel, w, h, t)
 
         // ---- creatures ----
-        val detail = if (sc < 3f) 1 else if (sc < 9f) 2 else 3
         val margin = 40f
         for (i in 0 until snap.n) {
             val x = snap.px[i] + (snap.x[i] - snap.px[i]) * ia
@@ -165,7 +164,7 @@ class Scene(val engine: SimEngine, val host: AppHost? = null) {
             val sp = snap.sp[i].toInt()
             val hd = snap.ph[i] + wrap(snap.h[i] - snap.ph[i]) * ia
             val k = kPx * Art.bodyScale[sp] * snap.scale[i]
-            Art.draw(g, sp, sx, sy, hd, k, snap.walk[i], snap.flags[i].toInt(), t, (snap.uid[i] % 97).toFloat(), detail, snap.female[i])
+            Art.draw(g, sp, sx, sy, hd, k, snap.walk[i], snap.flags[i].toInt(), t, (snap.uid[i] % 97).toFloat(), Art.detailFor(sp, k), snap.female[i])
         }
 
         // ---- effects ----

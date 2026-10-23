@@ -14,9 +14,10 @@ class SimConfig(
     val hardCap: Int = 900,
     /** Most creatures of each species (0 = only the total cap). Stops one species taking all the room. */
     val speciesCap: IntArray = intArrayOf(100, 300, 500),
-    val plants: Int = 400,
-    /** Fix 11: plants grow back faster (was 1700 steps), more food without more plants on the map. */
-    val plantRegrowTicks: Int = 1000,
+    /** Fix 11: more plants (was 400). With the faster regrowth below, about 2.9x the food of 400 plants at 1000 steps. */
+    val plants: Int = 700,
+    /** Fix 11: plants grow back faster (was 1700 steps, then 1000). */
+    val plantRegrowTicks: Int = 600,
     val plantEnergy: Float = 50f,
     val shelters: IntArray = intArrayOf(1, 5, 20),
     /** Spread of the random change when a gene is copied to a baby. */
@@ -73,6 +74,33 @@ class SimConfig(
     /** Fix 15: size of the random change when a brain family is copied. */
     val brainMutation: Float = 0.02f,
 
+    // ---- fix 18: immigrants instead of rescues ----
+    /**
+     * A species below its minimum population (or wiped out) gets a few newcomers at the edge of the map, from its best
+     * genes and best brain family, at most once every [immigrationEvery] steps. Brains are never reset, and a species
+     * can stay wiped out for a while, so failing has a real cost.
+     */
+    val immigration: Boolean = true,
+    val immigrationEvery: Int = 3000,
+
+    // ---- fix 19: brains evolve ----
+    /**
+     * Each brain family has genes: brain size, learning rate, curiosity, look-ahead and motivations (how much it cares
+     * about food, mating, babies, hurt, hunger, exploring, death). When a weak family is replaced by a copy of the
+     * strongest one, the genes change a little, so evolution decides them.
+     */
+    val evolveBrains: Boolean = true,
+    /** A family with fewer than this share of the biggest family's members is replaced by a changed copy of it (0 = only empty ones). */
+    val familyReplaceShare: Float = 0.25f,
+    /** Extra energy a brain costs: a brain twice the starting size eats this share more (a smaller one saves as much). */
+    val brainEnergyCost: Float = 0.1f,
+    /** Size of the random change to learning settings and motivations when a family is copied (relative). */
+    val brainGeneMutation: Float = 0.2f,
+    /** Chance a copied family's brain grows or shrinks (8 neurons per layer, or now and then a layer). */
+    val brainGrowChance: Float = 0.3f,
+    val brainMinSize: Int = 8,
+    val brainMaxSize: Int = 128,
+
     /** Every this many steps, a frozen copy of the brains plays a fixed test world (the exam). 0 = never. */
     val examEvery: Int = 10000,
     /** Steps one exam lasts. */
@@ -107,8 +135,13 @@ class SimConfig(
     // ---- reward: what the brains try to get more of ----
     /** Food reward = energy gained / max energy, times this. */
     val foodRewardScale: Float = 1f,
-    /** Reward to each parent for a mating that gives babies. */
-    val matingReward: Float = 5f,
+    /** Reward to each parent for a mating that gives babies (fix 16 lowers it: was 5). */
+    val matingReward: Float = 1f,
+    /**
+     * Fix 16: reward to each parent when its babies grow up: this much for a whole litter of average size
+     * (each grown-up baby gives a share). Raising babies pays, a mating that ends in dead babies does not.
+     */
+    val grownUpReward: Float = 6f,
     /** Reward lost when a creature dies (not for old age after having babies). */
     val deathPenalty: Float = 3f,
     /** Hurt penalty = health lost / max health, times this. */
@@ -123,11 +156,15 @@ class SimConfig(
     val starveDamage: Float = 0.3f,
     /** Share of max health healed per step resting in its own shelter. */
     val shelterHeal: Float = 0.004f,
-    /** A female needs at least this share of max energy to mate. */
-    val mateEnergyNeeded: Float = 0.6f,
-    /** Share of max energy one litter costs the mother, and the father. */
+    /** A female needs at least this share of max energy to mate (fix 17 raises it: was 0.6). */
+    val mateEnergyNeeded: Float = 0.75f,
+    /** Share of max energy one litter costs the mother (an average-size litter with fix 17), and the father. */
     val litterCost: Float = 0.5f,
     val fatherCost: Float = 0.1f,
+    /** Fix 17: a bigger litter costs more, a smaller one less ([litterCost] is for an average litter). */
+    val litterCostBySize: Boolean = true,
+    /** Fix 17: a mother never spends below this share of her energy on a litter: the litter is smaller instead. */
+    val litterReserve: Float = 0.2f,
 
     // ---- learning (PPO) ----
     /** Steps between two decisions of a creature. */
@@ -209,6 +246,11 @@ class SimConfig(
         m["satietyLevel"] = "$satietyLevel"; m["allCanHunt"] = "$allCanHunt"; m["meatShare"] = "$meatShare"
         m["shelterSpeed"] = "$shelterSpeed"; m["shelterSignal"] = "$shelterSignal"; m["matingInShelter"] = "$matingInShelter"
         m["familyCheckEvery"] = "$familyCheckEvery"; m["familyCopyMinMembers"] = "$familyCopyMinMembers"
+        m["grownUpReward"] = "$grownUpReward"; m["litterCostBySize"] = "$litterCostBySize"; m["litterReserve"] = "$litterReserve"
+        m["immigration"] = "$immigration"; m["immigrationEvery"] = "$immigrationEvery"
+        m["evolveBrains"] = "$evolveBrains"; m["familyReplaceShare"] = "$familyReplaceShare"; m["brainEnergyCost"] = "$brainEnergyCost"
+        m["brainGeneMutation"] = "$brainGeneMutation"; m["brainGrowChance"] = "$brainGrowChance"
+        m["brainMinSize"] = "$brainMinSize"; m["brainMaxSize"] = "$brainMaxSize"
         for (k in SpeciesParams.keys) m["sp.$k"] = (species[k] ?: FloatArray(NSP) { SpeciesParams.get(Species.all[it], k) }).joinToString(",") { fmt(it) }
         return m
     }
@@ -227,15 +269,28 @@ class SimConfig(
 
         /** Settings exactly as version 1 had them (all fixes off), for comparing. */
         val VERSION_1: Map<String, String> = mapOf(
-            "hardCap" to "1500", "plantRegrowTicks" to "1700", "shelterHealsStarving" to "true", "shelterMaxStay" to "0",
+            "hardCap" to "1500", "plants" to "400", "plantRegrowTicks" to "1700", "shelterHealsStarving" to "true", "shelterMaxStay" to "0",
             "shelterCapacity" to "0,0,0", "shelterHungerPenalty" to "0.02", "smellScale" to "1.0", "exploreReward" to "0.0",
             "adaptiveEntropy" to "false", "minPopulation" to "0,0,0", "learnBatch" to "2048,2048,2048",
             "brainResetRescues" to "0", "babyEnergy" to "0.3", "motherFeed" to "12", "learnedMateChoice" to "false",
             "brainFamilies" to "1,1,1", "speciesCap" to "0,0,0", "sp.litterMin" to "5,15,30", "sp.litterMax" to "10,20,50",
+            "matingReward" to "5", "grownUpReward" to "0", "mateEnergyNeeded" to "0.6", "litterCostBySize" to "false",
+            "litterReserve" to "0", "immigration" to "false", "evolveBrains" to "false", "familyReplaceShare" to "0", "brainEnergyCost" to "0",
         )
 
-        fun fromProps(p: Map<String, String>): SimConfig {
+        /**
+         * Values for settings that did not exist yet when an older version was made: the old behaviour, so opening an old
+         * version never changes how it runs.
+         */
+        private val BEFORE_FIXES_16_19: Map<String, String> = mapOf(
+            "grownUpReward" to "0", "litterCostBySize" to "false", "litterReserve" to "0", "immigration" to "false",
+            "evolveBrains" to "false", "familyReplaceShare" to "0", "brainEnergyCost" to "0",
+        )
+
+        fun fromProps(props: Map<String, String>): SimConfig {
             val d = SimConfig()
+            // an older version's settings file: settings it did not have keep the old behaviour
+            val p = if (props.containsKey("hardCap") && !props.containsKey("evolveBrains")) BEFORE_FIXES_16_19 + props else props
             fun ints(k: String, def: IntArray) = p[k]?.split(",")?.mapNotNull { it.trim().toIntOrNull() }
                 ?.takeIf { it.size == NSP }?.toIntArray() ?: def
             fun i(k: String, def: Int) = p[k]?.trim()?.toIntOrNull() ?: def
@@ -287,6 +342,14 @@ class SimConfig(
                 satietyLevel = f("satietyLevel", d.satietyLevel), allCanHunt = b("allCanHunt", d.allCanHunt),
                 meatShare = f("meatShare", d.meatShare), shelterSpeed = f("shelterSpeed", d.shelterSpeed),
                 shelterSignal = f("shelterSignal", d.shelterSignal), matingInShelter = b("matingInShelter", d.matingInShelter),
+                grownUpReward = f("grownUpReward", d.grownUpReward), litterCostBySize = b("litterCostBySize", d.litterCostBySize),
+                litterReserve = f("litterReserve", d.litterReserve), immigration = b("immigration", d.immigration),
+                immigrationEvery = i("immigrationEvery", d.immigrationEvery).coerceAtLeast(1),
+                evolveBrains = b("evolveBrains", d.evolveBrains), familyReplaceShare = f("familyReplaceShare", d.familyReplaceShare),
+                brainEnergyCost = f("brainEnergyCost", d.brainEnergyCost), brainGeneMutation = f("brainGeneMutation", d.brainGeneMutation),
+                brainGrowChance = f("brainGrowChance", d.brainGrowChance),
+                brainMinSize = i("brainMinSize", d.brainMinSize).coerceIn(1, 1024),
+                brainMaxSize = i("brainMaxSize", d.brainMaxSize).coerceIn(1, 1024),
                 species = SpeciesParams.keys.associateWith { k ->
                     val def = d.species[k]!!
                     p["sp.$k"]?.split(",")?.mapNotNull { it.trim().toFloatOrNull() }?.takeIf { it.size == NSP }?.toFloatArray() ?: def.copyOf()

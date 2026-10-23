@@ -14,6 +14,17 @@ object Art {
         Pal(0xFF4FA8F0.toInt(), 0xFF2A6CB0.toInt(), 0xFFAAD6FB.toInt()), // Gamma, sky blue
     )
     val bodyScale = floatArrayOf(0.95f, 0.85f, 0.6f)
+    /** Half the body length of each creature, in art units (before [bodyScale]). */
+    private val bodyR = floatArrayOf(11.6f, 8.8f, 5.2f)
+
+    /**
+     * How much to draw for a creature whose art unit is [k] pixels: 1 = a dot, 2 = the main shapes, 3 = everything.
+     * Picked from its size on screen, so a crowd seen from far away costs a few shapes each, not thirty.
+     */
+    fun detailFor(sp: Int, k: Float): Int {
+        val r = k * bodyR[sp]
+        return if (r < 3f) 1 else if (r < 7f) 2 else 3
+    }
     private val legAmp = floatArrayOf(2.4f, 2.4f, 1.2f)
     private val wagAmp = floatArrayOf(8f, 14f, 6f)
 
@@ -110,7 +121,7 @@ object Art {
                 ell(g, 0.4f, 0f, 6f, 3.2f, withAlpha(p.light, 0.28f))
                 g.save(); g.translate(hd, 0f); g.translate(7f, 0f); g.rotate(hr); g.translate(-7f, 0f)
                 circ(g, 7.4f, -4.4f, 2.8f, p.base); circ(g, 7.4f, 4.4f, 2.8f, p.base)
-                circ(g, 7.5f, -4.4f, 1.5f, withAlpha(p.light, 0.75f)); circ(g, 7.5f, 4.4f, 1.5f, withAlpha(p.light, 0.75f))
+                if (detail >= 3) { circ(g, 7.5f, -4.4f, 1.5f, withAlpha(p.light, 0.75f)); circ(g, 7.5f, 4.4f, 1.5f, withAlpha(p.light, 0.75f)) }
                 ell(g, 10.4f, 0f, 4.3f, 3.7f, p.base)
                 ell(g, 15.6f, 0f, 4.8f, 2.3f, p.base)
                 ell(g, 19.6f, 0f, 2.1f, 1.7f, p.light)
@@ -128,18 +139,17 @@ object Art {
                 g.save(); g.translate(-5f, 0f); g.rotate(wag); g.translate(5f, 0f)
                 circ(g, -6.4f, 0f, 2f, p.light); glow(g, -6.9f, 0f, 1f, pulse)
                 g.restore()
-                for (j in 0 until 10) {
+                if (detail >= 3) for (j in 0 until 10) {
                     val an = j * 0.6283f
                     circ(g, kotlin.math.cos(an) * 4.7f, kotlin.math.sin(an) * 4.7f, 1.6f, p.base)
                 }
-                circ(g, 0f, 0f, 5.2f, p.base)
+                circ(g, 0f, 0f, if (detail >= 3) 5.2f else 6f, p.base)
                 ell(g, -0.6f, 0f, 3.2f, 2.4f, withAlpha(p.light, 0.3f))
                 g.save(); g.translate(hd, 0f); g.translate(4f, 0f); g.rotate(hr); g.translate(-4f, 0f)
                 circ(g, 3f, -4.3f, 2.5f, p.base); circ(g, 3f, 4.3f, 2.5f, p.base)
-                circ(g, 3.1f, -4.3f, 1.3f, withAlpha(p.light, 0.8f)); circ(g, 3.1f, 4.3f, 1.3f, withAlpha(p.light, 0.8f))
+                if (detail >= 3) { circ(g, 3.1f, -4.3f, 1.3f, withAlpha(p.light, 0.8f)); circ(g, 3.1f, 4.3f, 1.3f, withAlpha(p.light, 0.8f)) }
                 circ(g, 5.2f, 0f, 3.4f, p.base)
-                eye(g, 6.6f, -1.6f, 1.2f); eye(g, 6.6f, 1.6f, 1.2f)
-                circ(g, 8.4f, 0f, 0.55f, BLACK)
+                if (detail >= 3) { eye(g, 6.6f, -1.6f, 1.2f); eye(g, 6.6f, 1.6f, 1.2f); circ(g, 8.4f, 0f, 0.55f, BLACK) }
                 g.restore()
             }
         }

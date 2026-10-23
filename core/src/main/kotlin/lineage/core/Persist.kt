@@ -101,6 +101,7 @@ object Persist {
         val dir = file.absoluteFile.parentFile
         readPopulation(w, File(dir, "population.csv"))
         readEvents(w, File(dir, "events.csv"))
+        readGenes(w, File(dir, "brain_genes.csv"))
         w.brain?.let { b ->
             b.load(File(dir, "brains.bin"))
             // the learning graph carries on from the log
@@ -134,6 +135,48 @@ object Persist {
             }
         }
         w.rescues = r; w.topUps = t; w.familyCopies = c; w.brainResets = b
+    }
+
+    /** Rebuilds the brain gene curves (fix 19) from brain_genes.csv: per check, the members-weighted average of each species. */
+    private fun readGenes(w: World, f: File) {
+        if (!f.exists()) return
+        for (s in 0 until NSP) for (c in w.geneCurves[s]) c.clear()
+        // rows of one check share a tick and species: gather them, then add one point
+        var curTick = -1L; var curSp = -1
+        val rows = ArrayList<FloatArray>()
+        fun flush() {
+            if (curSp < 0 || rows.isEmpty()) return
+            val total = rows.sumOf { it[0].toDouble() }.toFloat()
+            val v = FloatArray(NGC)
+            for (r in rows) {
+                val wgt = if (total > 0f) r[0] / total else 1f / rows.size
+                for (k in 0 until NGC) v[k] += wgt * r[k + 1]
+            }
+            for (k in 0 until NGC) w.geneCurves[curSp][k].add(curTick, v[k], 0f)
+            rows.clear()
+        }
+        f.bufferedReader().use { r ->
+            r.readLine() ?: return
+            while (true) {
+                val line = r.readLine() ?: break
+                val p = line.split(',')
+                if (p.size < 9 + lineage.core.rl.NM) continue
+                val t = p[0].toLongOrNull() ?: continue
+                val s = Species.all.indexOfFirst { it.name == p[1] }
+                if (s < 0) continue
+                if (t != curTick || s != curSp) { flush(); curTick = t; curSp = s }
+                val gamma = p[8].toFloatOrNull() ?: continue
+                val row = FloatArray(NGC + 1)
+                row[0] = p[3].toFloatOrNull() ?: 0f
+                row[1 + GC_HIDDEN] = p[4].toFloatOrNull() ?: 0f; row[1 + GC_LAYERS] = p[5].toFloatOrNull() ?: 0f
+                row[1 + GC_LR] = p[6].toFloatOrNull() ?: 0f; row[1 + GC_CURIOSITY] = p[7].toFloatOrNull() ?: 0f
+                row[1 + GC_HORIZON] = 1f / kotlin.math.max(1e-4f, 1f - gamma)
+                for (k in 0 until lineage.core.rl.NM) row[1 + GC_MOTIVE + k] = p[9 + k].toFloatOrNull() ?: 1f
+                rows.add(row)
+            }
+        }
+        flush()
+        w.geneCurveVersion++
     }
 
     /** Rebuilds the whole-run population curve and death totals from the log (the newest run in the file). */

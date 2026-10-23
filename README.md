@@ -43,6 +43,12 @@ The full list with ranges is in `core/src/main/kotlin/lineage/core/Params.kt`.
 which senses pushed it to its choice. The stats page's `Brains` tab shows the same for a whole species.
 `./gradlew :core:run --args="--explain ~/LineageRuns/v8"` writes `brain_report.csv` and `brain_neurons.csv`.
 
+**Brains that evolve (fixes 16-19):** each brain family carries genes (brain size, learning rate, curiosity,
+look-ahead, and motivations: how much it cares about food, mating, babies, hurt, hunger, exploring, death). Weak
+families are replaced by changed copies of the strongest, and bigger brains eat more, so evolution decides. Parents
+are rewarded when their babies grow up, litters cost by size, and immigrants replace rescues (no brain resets).
+Stats page `Evolution` tab, and `brain_genes.csv`. Details: `ANATOMY.md` section 14.
+
 **Stats page:** `stats` in the top bar (key `T`) shows, per species, whether its brains are improving (exam and live
 verdicts with the numbers behind them) and charts of exam score, live reward, curiosity and population, plus what the
 brains choose now, how they die, mate choice, and brain families. Versions are kept in `~/LineageRuns/v2`, `v3`, ...; the old folder `live` shows as v1.
@@ -111,6 +117,7 @@ Written as plain CSV files into the run folder, append-only:
 - `events.csv`: kills, extinctions, rescues, top-ups, brain copies and brain resets (births and deaths can be switched on in `SimConfig`).
 - `training.csv`: every learning update, every exam, mate-choice statistics (columns in `ANATOMY.md` 3.8).
 - `settings.txt` and `note.txt`: the version's settings and what it is about.
+- `brain_genes.csv`: every family check, each brain family's members and genes (size, learning settings, motivations).
 - `creatures.csv`: life record of notable creatures (3 or more offspring or kills, or lived to old age).
 - `run.txt`: the settings of the run. `world.save`: the full world, so a restart carries on.
 

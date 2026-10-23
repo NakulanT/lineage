@@ -115,6 +115,9 @@ class RenderSnapshot(
     /** Deaths per cause over the run ([species][cause], value = deaths per 600 steps), and when each species was wiped out. */
     var deathCurves: Array<Array<LearnCurve>>? = null
     var wipeouts: Array<LongArray>? = null
+    /** Brain genes over the run per species ([species][gene], see [GC_HIDDEN]) and each family's genes now (fix 19). */
+    var geneCurves: Array<Array<LearnCurve>>? = null
+    var familyGenes: Array<Array<lineage.core.rl.BrainGenes>>? = null
     /** Species-wide feature attribution and neuron behaviour. */
     var brainStats: lineage.core.rl.BrainStats? = null
     /** Where the shelters are now (they move). */

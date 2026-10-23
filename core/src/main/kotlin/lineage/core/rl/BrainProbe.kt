@@ -27,6 +27,8 @@ class BrainView(
     val chosen: Int,
     /** How much each input pushed the chosen action's chance up (+) or down (-), integrated gradients. */
     val attribution: FloatArray,
+    /** Its brain family's genes (size, learning settings, motivations). */
+    val genes: BrainGenes,
 )
 
 /**
@@ -85,7 +87,7 @@ object BrainProbe {
         var chosen = lastChoice
         if (chosen < 0 || chosen >= NA || !m[chosen]) { chosen = 0; for (a in 0 until NA) if (p[a] > p[chosen]) chosen = a }
         val attr = attribution(L, o, m, chosen)
-        return BrainView(L.sp, L.family, o.copyOf(), hidden, p, m.copyOf(), chosen, attr)
+        return BrainView(L.sp, L.family, o.copyOf(), hidden, p, m.copyOf(), chosen, attr, L.genes.copy())
     }
 
     /** The top reasons for a choice, as "(+) prey health low" style text, biggest first. */
@@ -98,6 +100,8 @@ object BrainProbe {
  * Species-wide picture of how the brains decide, gathered from a sample of real decisions:
  * how much each sense matters for each choice, and how each hidden neuron behaves.
  * Old samples fade out (halved every log interval), so it shows the brains as they are now.
+ * Brain families can have different brain sizes (fix 19): the neuron numbers follow one brain shape per species and
+ * switch to another shape once the old one has not been seen for a while.
  */
 class BrainStats(hidden: Int, layers: Int) {
     /** [species][action][input]: summed absolute and signed attribution. */
@@ -105,14 +109,26 @@ class BrainStats(hidden: Int, layers: Int) {
     val sumAttr = Array(NSP) { Array(NA) { FloatArray(OBS) } }
     val samples = Array(NSP) { FloatArray(NA) }
     /** [species][layer][neuron]: how often it is nearly off (|a| < 0.05), nearly maxed (|a| > 0.95), and its mean |a|. */
-    val off = Array(NSP) { Array(layers) { FloatArray(hidden) } }
-    val maxed = Array(NSP) { Array(layers) { FloatArray(hidden) } }
-    val meanAbs = Array(NSP) { Array(layers) { FloatArray(hidden) } }
+    var off = Array(NSP) { Array(layers) { FloatArray(hidden) } }; private set
+    var maxed = Array(NSP) { Array(layers) { FloatArray(hidden) } }; private set
+    var meanAbs = Array(NSP) { Array(layers) { FloatArray(hidden) } }; private set
     val neuronSamples = FloatArray(NSP)
     /** [species][layer][neuron][input]: correlation-style link (activation times input), to name what a neuron reacts to. */
-    val link = Array(NSP) { Array(layers) { Array(hidden) { FloatArray(OBS) } } }
+    var link = Array(NSP) { Array(layers) { Array(hidden) { FloatArray(OBS) } } }; private set
 
     private val tmp = FloatArray(OBS)
+
+    /** Hidden layer sizes the neuron numbers of species [s] are kept for. */
+    private fun shapeOf(s: Int) = IntArray(off[s].size) { off[s][it].size }
+
+    /** Starts the neuron numbers of species [s] again for a brain with these hidden layer sizes. */
+    private fun reshape(s: Int, hidden: IntArray) {
+        off[s] = Array(hidden.size) { FloatArray(hidden[it]) }
+        maxed[s] = Array(hidden.size) { FloatArray(hidden[it]) }
+        meanAbs[s] = Array(hidden.size) { FloatArray(hidden[it]) }
+        link[s] = Array(hidden.size) { l -> Array(hidden[l]) { FloatArray(OBS) } }
+        neuronSamples[s] = 0f
+    }
 
     fun record(L: SpeciesLearner, o: FloatArray, m: BooleanArray, action: Int) {
         val s = L.sp
@@ -120,12 +136,16 @@ class BrainStats(hidden: Int, layers: Int) {
         BrainProbe.quickAttribution(L, o, m, action, tmp)
         for (i in 0 until OBS) { absAttr[s][action][i] += abs(tmp[i]); sumAttr[s][action][i] += tmp[i] }
         samples[s][action] += 1f
+        val hidden = IntArray(L.pi.nl - 1) { L.pi.sizes[it + 1] }
+        if (!hidden.contentEquals(shapeOf(s))) {
+            // another brain size: switch to it only once the current one has faded out
+            if (neuronSamples[s] >= 1f) return
+            reshape(s, hidden)
+        }
         L.pi.forward(o, 0)
-        val layers = minOf(off[s].size, L.pi.nl - 1)
-        for (l in 0 until layers) {
+        for (l in hidden.indices) {
             val a = L.pi.act[l + 1]
-            val n = minOf(a.size, off[s][l].size)
-            for (k in 0 until n) {
+            for (k in 0 until hidden[l]) {
                 val v = abs(a[k])
                 if (v < 0.05f) off[s][l][k] += 1f
                 if (v > 0.95f) maxed[s][l][k] += 1f
@@ -165,10 +185,11 @@ class BrainStats(hidden: Int, layers: Int) {
     }
 
     fun copy(): BrainStats {
-        val c = BrainStats(off[0].firstOrNull()?.size ?: 0, off[0].size)
+        val c = BrainStats(0, 0)
         for (s in 0 until NSP) {
             for (a in 0 until NA) { absAttr[s][a].copyInto(c.absAttr[s][a]); sumAttr[s][a].copyInto(c.sumAttr[s][a]) }
             samples[s].copyInto(c.samples[s])
+            c.reshape(s, shapeOf(s))
             for (l in off[s].indices) {
                 off[s][l].copyInto(c.off[s][l]); maxed[s][l].copyInto(c.maxed[s][l]); meanAbs[s][l].copyInto(c.meanAbs[s][l])
                 for (k in link[s][l].indices) link[s][l][k].copyInto(c.link[s][l][k])

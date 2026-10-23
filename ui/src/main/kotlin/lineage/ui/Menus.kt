@@ -474,7 +474,7 @@ class Menus(private val scene: Scene) {
         for (c in changes.take(12)) { g.text(clipText(g, "\u2022 $c", 11f * u, w), x, y + 12f * u, 11f * u, ACCENT); y += 17f * u }
         if (changes.size > 12) { g.text("\u2026 and ${changes.size - 12} more", x, y + 12f * u, 11f * u, DIM); y += 17f * u }
 
-        // the 15 fixes as switches
+        // the fixes as switches
         y += 8f * u
         g.text("FIXES (shortcuts: each one sets a few of the numbers in the other tabs)", x, y + 13f * u, 10f * u, DIM, 0, true)
         y += 22f * u
@@ -624,7 +624,7 @@ class Menus(private val scene: Scene) {
             "" to "Exam: every ${scene.world.cfg.examEvery} steps a frozen copy of the brains plays the same test world. A rising exam score is the fair sign of learning; the arrows use it once there are 5 exams.",
             "VERSIONS" to "",
             "" to "A version is one world from random brains with its own settings and its own log folder.",
-            "" to "\"+ New version\" (or \"copy+edit\" on a version) opens the settings: every threshold in tabs (World, Reward, Shelters, Body, Senses, Breeding, Learning), the 15 fixes as switches, and whether to start from random brains or another version's brains.",
+            "" to "\"+ New version\" (or \"copy+edit\" on a version) opens the settings: every threshold in tabs (World, Reward, Shelters, Body, Senses, Breeding, Learning), the fixes (1-19) as switches, and whether to start from random brains or another version's brains.",
             "STATS" to "",
             "" to "\"stats\" in the top bar (key T) shows, per species, whether its brains are improving: exam scores, live reward, curiosity, population, what the brains choose, and how they die.",
             "" to "\"Compare\" draws the learning of every version on the same chart, so you can see which settings learn best.",

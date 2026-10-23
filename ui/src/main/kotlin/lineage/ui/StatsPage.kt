@@ -2,7 +2,9 @@ package lineage.ui
 
 import lineage.core.*
 import lineage.core.rl.ACTION_NAMES
+import lineage.core.rl.MOTIVE_NAMES
 import lineage.core.rl.NA
+import lineage.core.rl.NM
 import lineage.core.rl.OBS
 import lineage.core.rl.OBS_NAMES
 import kotlin.math.abs
@@ -23,8 +25,8 @@ private const val WARN = 0xFFFFD166.toInt()
  * exam scores, live reward, curiosity (entropy), population, what the brains choose, and how they die.
  */
 class StatsPage(private val scene: Scene) {
-    val tabs = listOf("Overview") + Species.all.map { it.name } + "Brains"
-    /** Species shown on the Brains tab. */
+    val tabs = listOf("Overview") + Species.all.map { it.name } + "Evolution" + "Brains"
+    /** Species shown on the Brains and Evolution tabs. */
     private var brainSp = 0
     var tab = 0
 
@@ -37,6 +39,7 @@ class StatsPage(private val scene: Scene) {
         return when (tab) {
             0 -> overview(g, snap, x, y0, w)
             tabs.size - 1 -> brains(g, snap, x, y0, w, clipTop, clipBottom)
+            tabs.size - 2 -> evolution(g, snap, x, y0, w, clipTop, clipBottom)
             else -> species(g, snap, tab - 1, x, y0, w)
         }
     }
@@ -56,11 +59,9 @@ class StatsPage(private val scene: Scene) {
      * How a species' brains decide, from a sample of real decisions: which senses matter (feature attribution),
      * which senses push which choice, and how the hidden neurons behave.
      */
-    private fun brains(g: Gfx, snap: RenderSnapshot, x: Float, y0: Float, w: Float, clipTop: Float, clipBottom: Float): Float {
+    /** One chip per species (selects [brainSp]); returns the height used. */
+    private fun speciesChips(g: Gfx, x: Float, y: Float, clipTop: Float, clipBottom: Float): Float {
         val u = scene.uiScale
-        var y = y0
-        val st = snap.brainStats
-        // species chips
         var cx = x
         for (s in 0 until NSP) {
             val name = Species.all[s].name
@@ -71,7 +72,115 @@ class StatsPage(private val scene: Scene) {
             if (y1c > y0c) scene.hit(cx, y0c, cw, y1c - y0c) { brainSp = s }
             cx += cw + 6f * u
         }
-        y += 32f * u
+        return 32f * u
+    }
+
+    /**
+     * Fix 19: what evolution chose for a species' brains: size, learning settings and motivations over the run
+     * (average over its creatures), and each brain family's genes now.
+     */
+    private fun evolution(g: Gfx, snap: RenderSnapshot, x: Float, y0: Float, w: Float, clipTop: Float, clipBottom: Float): Float {
+        val u = scene.uiScale
+        val cfg = scene.world.cfg
+        var y = y0
+        y += speciesChips(g, x, y, clipTop, clipBottom)
+        val s = brainSp
+        val d = Species.all[s]
+        y = scene.menus.wrapText(g, if (cfg.evolveBrains)
+            "Each brain family has genes: brain size, learning rate, curiosity, how far ahead it plans, and motivations (how much it " +
+                "cares about each part of the reward; 1 = the version's setting). Every ${cfg.familyCheckEvery} steps a family with " +
+                "under ${(cfg.familyReplaceShare * 100).toInt()}% of the biggest family's members is replaced by a changed copy of the " +
+                "biggest. So the genes that keep creatures alive and breeding spread. Lines = average over the species' creatures."
+            else "Brain evolution is off in this version (fix 19), so the genes stay at the settings. Turn it on in a new version.",
+            x, y + 2f * u, w, 11f * u, DIM)
+        y += 8f * u
+        val gc = snap.geneCurves?.get(s)
+        val gap = 8f * u
+        val cw = if (w > 560f * u) (w - gap) / 2f else w
+        val ch = 130f * u
+        val two = cw < w
+        val now = { k: Int -> gc?.get(k)?.let { c -> if (c.n > 0) c.reward[c.n - 1] else null } }
+        val charts = listOf<(Float, Float) -> Unit>(
+            { cx, cy -> chart(g, cx, cy, cw, ch, "Brain size (neurons per layer)",
+                "now ${now(GC_HIDDEN)?.let { "%.0f".format(it) } ?: "-"} x ${now(GC_LAYERS)?.let { "%.1f".format(it) } ?: "-"} layers  ·  bigger costs energy",
+                gc?.get(GC_HIDDEN), false, d.color, fixedLo = 0f) },
+            { cx, cy -> chart(g, cx, cy, cw, ch, "Learning rate", "how big each learning step is", gc?.get(GC_LR), false, d.color, fixedLo = 0f) },
+            { cx, cy -> chart(g, cx, cy, cw, ch, "Curiosity (base entropy bonus)", "high = tries more new things", gc?.get(GC_CURIOSITY), false, d.color, fixedLo = 0f) },
+            { cx, cy -> chart(g, cx, cy, cw, ch, "Plans ahead (decisions)", "from the look-ahead gene (gamma)", gc?.get(GC_HORIZON), false, d.color, fixedLo = 0f) },
+        )
+        for ((k, c) in charts.withIndex()) {
+            val cx = if (two) x + (k % 2) * (cw + gap) else x
+            val cy = if (two) y + (k / 2) * (ch + gap) else y + k * (ch + gap)
+            c(cx, cy)
+        }
+        y += if (two) 2 * (ch + gap) else 4 * (ch + gap)
+        motiveChart(g, gc, x, y, w, 190f * u)
+        y += 190f * u + gap
+
+        // each family now
+        y += 4f * u
+        g.text("BRAIN FAMILIES NOW", x, y + 12f * u, 10f * u, DIM, 0, true)
+        y += 20f * u
+        val fg = snap.familyGenes?.get(s)
+        val fm = snap.familyMembers?.get(s)
+        if (fg == null) { g.text("no brain families", x, y + 11f * u, 11f * u, DIM); return y + 24f * u - y0 }
+        for ((f, gn) in fg.withIndex()) {
+            val members = fm?.getOrNull(f) ?: 0
+            g.fillRoundRect(x, y, w, 46f * u, 8f * u, PANEL2)
+            g.text("Family ${f + 1}  ·  $members creatures", x + 10f * u, y + 17f * u, 12f * u, d.color, 0, true)
+            g.text(scene.menus.clipText(g, gn.describe(), 10.5f * u, w * 0.6f), x + w - 10f * u, y + 17f * u, 10.5f * u, TXT, 2)
+            val top = (0 until NM).sortedByDescending { gn.motive[it] }
+            val likes = top.take(2).joinToString(", ") { "${MOTIVE_NAMES[it]} x${"%.2f".format(gn.motive[it])}" }
+            val least = top.last().let { "${MOTIVE_NAMES[it]} x${"%.2f".format(gn.motive[it])}" }
+            g.text(scene.menus.clipText(g, "cares most about $likes  ·  least about $least", 10.5f * u, w - 20f * u), x + 10f * u, y + 36f * u, 10.5f * u, DIM)
+            y += 52f * u
+        }
+        return y + 10f * u - y0
+    }
+
+    /** The species' average motivations over the run, one line each (1 = the version's setting). */
+    private fun motiveChart(g: Gfx, gc: Array<LearnCurve>?, x: Float, y: Float, w: Float, h: Float) {
+        val u = scene.uiScale
+        val colors = intArrayOf(GOOD, 0xFFFF8AC6.toInt(), WARN, BAD, 0xFFFFA24D.toInt(), ACCENT, 0xFFB0B6C2.toInt())
+        g.fillRoundRect(x, y, w, h, 10f * u, PANEL2)
+        g.text("Motivations", x + 10f * u, y + 17f * u, 12f * u, TXT, 0, true)
+        var lx = x + 10f * u; var ly = y + 31f * u
+        for (k in 0 until NM) {
+            val c = gc?.get(GC_MOTIVE + k)
+            val label = "${MOTIVE_NAMES[k]} ${if (c != null && c.n > 0) "x%.2f".format(c.reward[c.n - 1]) else ""}"
+            val lw = 22f * u + g.measure(label, 9.5f * u)
+            if (lx + lw > x + w - 10f * u) { lx = x + 10f * u; ly += 13f * u }
+            g.fillRoundRect(lx, ly - 5f * u, 12f * u, 4f * u, 2f * u, colors[k])
+            g.text(label, lx + 16f * u, ly, 9.5f * u, TXT)
+            lx += lw + 6f * u
+        }
+        val px0 = x + 46f * u; val px1 = x + w - 10f * u
+        val py0 = ly + 12f * u; val py1 = y + h - 16f * u
+        g.line(px0, py1, px1, py1, withAlpha(DIM, 0.4f), 1f)
+        if (gc == null || gc[GC_MOTIVE].n < 2) { g.text("shown after two family checks", (px0 + px1) / 2f, (py0 + py1) / 2f, 11f * u, DIM, 1); return }
+        var hi = 1.5f
+        for (k in 0 until NM) { val c = gc[GC_MOTIVE + k]; for (i in 0 until c.n) hi = max(hi, c.reward[i]) }
+        val t0 = gc[GC_MOTIVE].tick[0]; val t1 = max(t0 + 1f, gc[GC_MOTIVE].tick[gc[GC_MOTIVE].n - 1])
+        fun sy(v: Float) = py1 - (py1 - py0) * (v / hi).coerceIn(0f, 1f)
+        g.text("%.1f".format(hi), px0 - 5f * u, py0 + 4f * u, 9f * u, DIM, 2)
+        g.text("0", px0 - 5f * u, py1, 9f * u, DIM, 2)
+        var dx = px0
+        while (dx < px1) { g.line(dx, sy(1f), min(px1, dx + 5f * u), sy(1f), withAlpha(DIM, 0.5f), 1f); dx += 9f * u }
+        g.text("1 = setting", px1 - 2f * u, sy(1f) - 3f * u, 8.5f * u, DIM, 2)
+        g.text("day ${(t0 / DAY_TICKS).toInt()}", px0, py1 + 12f * u, 8.5f * u, DIM)
+        g.text("day ${(t1 / DAY_TICKS).toInt()}", px1, py1 + 12f * u, 8.5f * u, DIM, 2)
+        for (k in 0 until NM) {
+            val c = gc[GC_MOTIVE + k]
+            fun sx(i: Int) = px0 + (px1 - px0) * (c.tick[i] - t0) / (t1 - t0)
+            for (i in 1 until c.n) g.line(sx(i - 1), sy(c.reward[i - 1]), sx(i), sy(c.reward[i]), colors[k], 1.5f * u)
+        }
+    }
+
+    private fun brains(g: Gfx, snap: RenderSnapshot, x: Float, y0: Float, w: Float, clipTop: Float, clipBottom: Float): Float {
+        val u = scene.uiScale
+        var y = y0
+        val st = snap.brainStats
+        y += speciesChips(g, x, y, clipTop, clipBottom)
         val s = brainSp
         if (st == null || st.samples[s].sum() < 5f) {
             g.text("Not enough decisions sampled yet (one in ${scene.world.cfg.explainEvery} is examined). Let it run a little.", x, y + 12f * u, 11f * u, DIM)
@@ -195,8 +304,10 @@ class StatsPage(private val scene: Scene) {
         y += 20f * u
         val facts = listOf(
             "day" to "${snap.tick / DAY_TICKS}", "generation" to "${snap.maxGeneration}",
-            "updates" to "${snap.updates?.sum() ?: 0}", "rescues" to "${snap.rescues}",
-            "top-ups" to "${snap.topUps}", "brain copies" to "${snap.familyCopies}", "brain resets" to "${snap.brainResets}",
+            "updates" to "${snap.updates?.sum() ?: 0}",
+            (if (scene.world.cfg.immigration) "immigrant groups (wiped out)" else "rescues") to "${snap.rescues}",
+            (if (scene.world.cfg.immigration) "immigrant groups (top-up)" else "top-ups") to "${snap.topUps}",
+            "brain copies" to "${snap.familyCopies}", "brain resets" to "${snap.brainResets}",
         )
         y = factGrid(g, facts, x, y, w)
         return y + 10f * u - y0

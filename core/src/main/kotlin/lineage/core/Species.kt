@@ -78,7 +78,7 @@ object Species {
             speed = 2.5f, health = 100f, lifespanDays = 80, maxEnergy = 120f, hunger = 0.05f,
             strength = 18f, attackRange = 1.2f, attackCooldown = 12,
             vision = 8f, visionHalfAngle = 55f * D, hear = 6f, smell = 6f, call = 26f,
-            maturityDays = 18, femaleCooldownDays = 16, litterMin = 15, litterMax = 20, infantDays = 6,
+            maturityDays = 18, femaleCooldownDays = 16, litterMin = 10, litterMax = 15, infantDays = 6,
             shelterR = 3.2f, carnivore = false, plantEfficiency = 1.15f, meatEfficiency = 0.7f, bodyEnergy = 120f,
         ),
         SpeciesDef(
@@ -86,7 +86,7 @@ object Species {
             speed = 3.3f, health = 50f, lifespanDays = 50, maxEnergy = 100f, hunger = 0.04f,
             strength = 12f, attackRange = 1f, attackCooldown = 15,
             vision = 6f, visionHalfAngle = 95f * D, hear = 8f, smell = 6f, call = 16f,
-            maturityDays = 8, femaleCooldownDays = 8, litterMin = 5, litterMax = 10, infantDays = 3,
+            maturityDays = 8, femaleCooldownDays = 8, litterMin = 15, litterMax = 20, infantDays = 3,
             shelterR = 2.2f, carnivore = false, plantEfficiency = 1f, meatEfficiency = 0.7f, bodyEnergy = 50f,
         ),
     )

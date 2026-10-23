@@ -208,7 +208,8 @@ She accepts if score + a small random amount (±0.12) is above her own pickiness
 ### 5.3 Babies
 - Babies from one mating: Alpha 5 to 10, Beta 15 to 20, Gamma 5 to 10 (was 30 to 50, which filled the cap in 6 days),
   scaled by the parents' fertility gene. If the total cap or the species' own cap would be passed, the litter is cut to fit.
-- One litter costs the mother 50% of her max energy, whatever its size (she needs at least 60% to mate).
+- Babies per mating: Alpha 5-10, Beta 10-15, Gamma 15-20 (set by the user).
+- One litter costs the mother 50% of her max energy, whatever its size (she needs at least 60% to mate). With fix 17 the cost follows the litter size (section 14).
   The father pays 10% of his max energy.
 - A newborn starts with 50% energy (fix 13; was 30%), appears next to its mother, and stays a baby: Alpha 8 days,
   Beta 6, Gamma 3.
@@ -246,9 +247,9 @@ Six numbers per creature, 1.0 = species average:
 | Map | 128 × 128 cells |
 | Start | 5 Alpha, 20 Beta, 100 Gamma |
 | Population cap | 900 in total (fix 12; was 1,500), and at most Alpha 100, Beta 300, Gamma 500 |
-| Plants | 400, one kind only |
+| Plants | 700, one kind only (fix 11; was 400) |
 | Plant food | 50 energy (times the species' plant value) |
-| Plant regrowth | from 0 to ripe in 1,000 steps (fix 11; was 1,700), in the same place. Only ripe plants can be eaten |
+| Plant regrowth | from 0 to ripe in 600 steps (fix 11; was 1,700, then 1,000), in the same place. Only ripe plants can be eaten |
 | Meat | left by every death. Rots after 3,000 steps |
 | Shelters | circles: 1 Alpha, 5 Beta, 20 Gamma. Anyone can walk in; strangers lose health fast |
 | Rescue | on: if a species dies out, 6 are added (see below) |
@@ -283,7 +284,7 @@ Every run is a **version** with its own folder (`~/LineageRuns/v2`, `v3`, ... on
 | 8 | Copy instincts first | off | off by default (on = 3,000 steps of copying) |
 | 9 | Minimum population, small species learn faster | none, batch 2,048 | 3 / 6 / 12, batch 512 / 1,024 / 2,048 |
 | 10 | Reset a brain that keeps dying out | never | 10 rescues in 30,000 steps |
-| 11 | Plants grow back faster | 1,700 steps | 1,000 steps |
+| 11 | More food | 400 plants, 1,700 steps | 700 plants, 600 steps (about 2.9x the food of 400 at 1,000) |
 | 12 | Lower cap, room for each species | 1,500 total | 900 total, 100 / 300 / 500 per species |
 | 13 | Healthier babies | 30% energy, mother gives 12 | 50%, mother gives 16 |
 | 14 | Females learn mate choice | fixed rule | learned |
@@ -337,5 +338,33 @@ Every run is a **version** with its own folder (`~/LineageRuns/v2`, `v3`, ... on
 - A **threat** (inputs 13-15 and 31) is the nearest animal of another species that is hunting or biting it, or of a
   stronger species. So a Gamma sees Alpha and Beta as threats, and an Alpha sees a group of Gammas hunting it as one.
 
-## 14. Not built yet
+## 14. Brains that evolve (fixes 16-19)
+- **Plants no longer get locked (bug fix, all versions).** A creature that stopped halfway through eating (the brain
+  chose something else after 6 steps, eating takes 20) kept its claim on the plant forever, and so did a dead one. Within
+  a few hundred days nearly every plant was claimed by nobody, so 400 ripe plants stood untouched while everyone starved.
+  Now a claim only counts while its owner is really going for that plant or eating it.
+- **Fix 16, babies that grow up are rewarded.** Mating gives 1 (was 5). When a baby becomes adult, each parent still
+  alive gets `grownUpReward / average litter size` (6 for a whole average litter). So mating and then starving no longer pays.
+- **Fix 17, litters cost by size.** Each baby costs `litterCost / average litter size` of the mother's max energy; the
+  litter is made smaller rather than take her below `litterReserve` (20%). A female needs 75% energy to mate (was 60%).
+- **Fix 18, immigrants instead of rescues.** A species below its minimum gets newcomers at the map edge (best genes,
+  best brain family), at most once every `immigrationEvery` steps (3000 = 30 days). Brains are never reset. A species
+  can stay wiped out until the newcomers come, so failure is real and shows in the charts.
+- **Fix 19, brain genes.** Each brain family carries genes: neurons per layer, layers, learning rate, curiosity
+  (entropy bonus), look-ahead (gamma) and 7 motivations (food, mating, babies grow up, avoid hurt, avoid hunger,
+  exploring, avoid death). The brain learns from the reward weighted by its motivations; the exam and live stats use the
+  plain reward so scores stay comparable.
+  - Every `familyCheckEvery` steps, a family with under `familyReplaceShare` (25%) of the biggest family's members (or
+    none) becomes a changed copy of the biggest: weights plus a little noise, learning settings and motivations times
+    about e^(±0.2), and with chance `brainGrowChance` (30%) 8 neurons more or fewer per layer (sometimes a layer).
+  - Growing keeps behaviour exactly (new neurons start with 0 outgoing weights); shrinking drops the neurons with the
+    weakest outgoing weights; a new layer starts as a pass-through.
+  - A brain costs energy: upkeep x (1 + `brainEnergyCost` x (neurons / starting neurons - 1)). Twice the starting size
+    eats 10% more, a smaller brain saves.
+  - Stats page **Evolution** tab: brain size, learning rate, curiosity, plans-ahead and motivations over the run, and each
+    family's genes now. `brain_genes.csv` in the version folder has one row per family per check. The creature brain view
+    shows its family's genes.
+- Old versions keep running as before: a settings file without these keys gets them switched off.
+
+## 15. Not built yet
 - Social memory, food sharing beyond mother and baby, signals, killing within a species (see `PHASE_2.md`).

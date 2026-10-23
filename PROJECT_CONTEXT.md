@@ -433,3 +433,35 @@ Code is in this folder. Shared Kotlin simulation (`core`), shared screen (`ui`),
 ## 33. Looking inside the brains [Decided by the user]
 - Brain view per creature (senses, neurons, choice chances, integrated-gradient reasons), a Brains tab per species (sense importance, senses x choices, neuron health), and `--explain` CSV reports. Details in ANATOMY.md section 12.
 - Running alongside: a 2-layer vs 3-layer test (same seed and settings) to decide whether more hidden layers help.
+
+## 34. Plant-lock bug, and brains that evolve (fixes 16-19) [Decided by the user]
+- **Bug found in v10 (day 1,926):** all three species sat at the rescue minimum (3/6/12) from about day 130, with 400 of 400 plants ripe and most deaths from starvation. Cause: a creature that stopped eating halfway (brain decides every 6 steps, eating takes 20) or died kept its claim on the plant forever, so nobody else could ever eat it (a test: 362 of 500 plants locked after 8,000 steps). Fixed for every version.
+- Plant fix alone, 500 days, seed 1: ripe plants left standing 374 -> 85 of 400; Beta 57 -> 204 on average (642 deaths of old age); but Beta then learned to hunt Gamma (2,112 of 2,480 kills), and Gamma was wiped out 104 times.
+- Added (user's chosen list): babies-grow-up reward and mating reward 5 -> 1 (fix 16); litter cost by size with a 20% reserve, 75% energy to mate (fix 17); immigrants at the map edge at most every 30 days instead of rescues and brain resets (fix 18); brain genes per family (size, layers, learning rate, curiosity, look-ahead, 7 motivations) that mutate when a weak family is replaced, and bigger brains cost energy (fix 19). Evolution tab on the stats page, `brain_genes.csv`.
+- 500-day tests, fixes 16-19 on vs off (both with the plant fix):
+
+  | Run | Alpha avg / wiped | Beta avg | Gamma avg (2nd half) / wiped |
+  |---|---|---|---|
+  | seed 1, off | 6.4 / 9 | 204 | 12 / 104 |
+  | seed 1, on | 5.2 / 4 | 201 | 136 / 4 |
+  | seed 2, off | 50 / 0 | 282 | 12 / 33 |
+  | seed 2, on | 2.7 / 3 | 225 | 0.4 / 13 |
+
+- Reading: fewer wipe-outs in both seeds, and seed 1 is far better; seed 2 is worse for Alpha. In every run Beta fills its cap (300) and hunts Gamma. The next limit is Beta vs Gamma balance, not food or learning. Evolution is visibly working: in seed 1 Gamma's families shrank their brains to 56 neurons, raised "food" to about 1.3-1.4x and cut "avoid death" to about 0.35-0.4x.
+
+## 35. More food, new litter sizes [Decided by the user]
+- Litters: Beta 10-15 (was 15-20), Gamma 15-20 (was 5-10). Food: 700 plants regrowing in 600 steps (was 400 and 1,000), about 2.9x the food. Fix 11 is now "More food" (its off values: 400 plants, 1,700 steps). A fix now counts as on whenever its settings differ from the version 1 values, so older versions still show it on.
+- Why: by arithmetic, 400 plants at 1,000 steps gave about 40% of the food a healthy mix of the three species needs.
+- 500-day tests (fixes 16-19 on), before -> after:
+
+  | Seed | Alpha avg (2nd half) / wiped | Beta avg / wiped | Gamma avg (2nd half) / wiped | Starved (all) |
+  |---|---|---|---|---|
+  | 1 | 5.2 (6.4) / 4 -> 24.8 (46) / 1 | 201 / 2 -> 208 / 2 | 120 (136) / 4 -> 155 (178) / 7 | 2,902 -> 1,456 |
+  | 2 | 2.7 (2.3) / 3 -> 38.8 (72) / 2 | 225 / 1 -> 150 / 2 | 8 (0.4) / 13 -> 394 (488) / 1 | 934 -> 1,598 |
+
+- Reading: all three species now live together in both seeds; Alpha grew from a handful to 46-72; starving fell sharply for Beta. Gamma now dies mostly by being hunted (Alpha 2,808-6,283 kills, Beta 1,457-1,684): a food chain appeared. Seed 2 had no wipe-outs after day 258; seed 1 still lost Gamma 6 times between days 209 and 374.
+
+## 36. Speed: training on every core, lighter drawing [Asked by the user: "it hangs, not using my processor"]
+- Measured on v2 (900 creatures, all caps full) on the Intel i9 laptop (8 cores, 16 threads): 91% of the simulation's time was brain training (`Mlp.backward`) on one core. Each family's update froze the world for up to 535 ms, and the world ran at 31 steps/s (3x normal speed at "max").
+- Training now splits every minibatch into 16 fixed pieces that run on all cores (`rl/Par.kt`, per-thread `Mlp.Pass`), with gradients added in a fixed order, so a seed still gives exactly the same run on any machine. It also skips the unused input gradient. Result: 31 -> 98 steps/s, longest freeze 535 -> 100 ms.
+- Drawing: a creature's detail now follows its size on screen (`Art.detailFor`): a dot below 3 px, main shapes below 7 px, everything above. A full frame on the Retina screen went from 53 to 31 ms. The window draws a frame only when the last one had time to finish (at most about two thirds of its thread), and 15 frames/s while paused and untouched, so clicks and zooming never queue up. Window thread: about 63% -> 21% of a core.

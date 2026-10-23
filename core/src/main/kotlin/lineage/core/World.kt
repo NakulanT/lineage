@@ -47,6 +47,15 @@ private const val REGIONS = 8
 /** A healthy average male, used to show how willing females are (accept chance) in the panel. */
 private val AVG_MALE = floatArrayOf(1f, 0f, 0f, 0f, 0.4f, 0f, 0.8f, 0.4f, 1f)
 
+/** Brain gene curves (fix 19): neurons per layer, layers, learning rate, curiosity, decisions planned ahead, motivations. */
+const val GC_HIDDEN = 0
+const val GC_LAYERS = 1
+const val GC_LR = 2
+const val GC_CURIOSITY = 3
+const val GC_HORIZON = 4
+const val GC_MOTIVE = 5
+const val NGC = GC_MOTIVE + NM
+
 private const val MODE_THREAT = 0
 private const val MODE_PREY = 1
 private const val MODE_MATE = 2
@@ -205,6 +214,13 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
     var topUps = 0
     var brainResets = 0
     var familyCopies = 0
+    /** When each species last got immigrants (fix 18). */
+    private val lastImmigrants = LongArray(NSP) { -1_000_000L }
+    /**
+     * Brain genes over the run, per species (fix 19): one point per family check, the average over its creatures.
+     * Index: [GC_HIDDEN], [GC_LAYERS], [GC_LR], [GC_CURIOSITY], [GC_HORIZON], then [GC_MOTIVE] + motivation.
+     */
+    val geneCurves = Array(NSP) { Array(NGC) { LearnCurve(600) } }
     /** Ticks of recent rescues per species (fix 10). */
     private val rescueTicks = Array(NSP) { LongArray(64) }
     private val rescueN = IntArray(NSP)
@@ -232,7 +248,11 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
     /** How the brains decide, from a sample of real decisions (feature attribution and neuron behaviour). */
     var brainStats = BrainStats(cfg.brainSize, cfg.brainLayers)
     private var explainCount = 0L
-    private val rlBonus = FloatArray(cap)
+    /** Reward earned since its last decision, by kind (the brain family's motivations weigh them, fix 19). */
+    private val rwFood = FloatArray(cap)
+    private val rwMate = FloatArray(cap)
+    internal val rwKids = FloatArray(cap)
+    private val rwExplore = FloatArray(cap)
     private val prevEn = FloatArray(cap)
     private val prevHp = FloatArray(cap)
     private val obs = FloatArray(OBS)
@@ -429,7 +449,7 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
         birthTick[i] = tick - ageTicks
         dist[i] = 0f; flags[i] = 0
         trailN[i] = 0; trailHead[i] = 0; trailAcc[i] = 0f
-        rlBonus[i] = 0f; prevEn[i] = 0f; prevHp[i] = 0f; lastAction[i] = 0
+        rwFood[i] = 0f; rwMate[i] = 0f; rwKids[i] = 0f; rwExplore[i] = 0f; prevEn[i] = 0f; prevHp[i] = 0f; lastAction[i] = 0
         family[i] = 0; shelterT[i] = 0; shelterCd[i] = 0; visited[i] = 0L; litterOf[i] = -1; full[i] = false
         count[s]++
         aliveCount++
@@ -450,6 +470,18 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
     fun maxHp(i: Int) = def(i).health * gene(i, G_HP) * growth(i)
     fun isMature(i: Int) = age[i] >= def(i).maturityTicks
     fun isInfant(i: Int) = age[i] < def(i).infantTicks
+
+    /**
+     * Fix 19: a bigger brain eats more. 1 at the starting brain size; a brain twice that size costs
+     * [SimConfig.brainEnergyCost] more, a smaller one saves energy.
+     */
+    fun brainUpkeep(i: Int): Float {
+        val b = brain ?: return 1f
+        if (cfg.brainEnergyCost == 0f) return 1f
+        val start = max(1, cfg.brainSize * cfg.brainLayers).toFloat()
+        val g = b.learner(sp[i].toInt(), family[i].toInt()).genes
+        return (1f + cfg.brainEnergyCost * (g.neurons / start - 1f)).coerceAtLeast(0.5f)
+    }
 
     /** Good traits cost energy: a creature with every trait high eats noticeably more. */
     private fun metabolism(i: Int): Float =
@@ -545,7 +577,10 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
         if (huntCd[i] > 0) huntCd[i]--
         if (mateCd[i] > 0) mateCd[i]--
         if (shelterCd[i] > 0) shelterCd[i]--
-        if (age[i] == d.maturityTicks && litterOf[i] >= 0) litterMemberDone(i, true)
+        if (age[i] == d.maturityTicks) {
+            if (litterOf[i] >= 0) litterMemberDone(i, true)
+            grewUp(i)
+        }
         if (hurtT[i] > 0) { hurtT[i]--; flags[i] = (flags[i].toInt() or F_HURT).toByte() }
 
         if (age[i] > (d.lifespanTicks * gene(i, G_LIFE)).toInt()) { die(i, C_OLD, -1); return }
@@ -579,7 +614,7 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
         }
 
         // energy upkeep and healing
-        val upkeep = d.hunger * metabolism(i) * (0.4f + 0.6f * growth(i)) * (1f + 0.6f * moveFactor)
+        val upkeep = d.hunger * metabolism(i) * (0.4f + 0.6f * growth(i)) * (1f + 0.6f * moveFactor) * brainUpkeep(i)
         en[i] = max(0f, en[i] - upkeep)
         // full after eating: no more food until energy falls below the satiety level
         if (en[i] >= d.maxEnergy * 0.98f) full[i] = true
@@ -677,7 +712,8 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
     }
 
     private fun setState(i: Int, s: Int, target: Int) {
-        if (st[i].toInt() == S_TOPLANT && tgt[i] >= 0 && tgt[i] != target) releasePlant(i)
+        // stopping halfway to a plant or halfway through eating it lets go of it (it used to stay locked forever)
+        if (st[i].toInt() == S_TOPLANT || st[i].toInt() == S_EAT) releasePlant(i)
         st[i] = s.toByte()
         tgt[i] = target
         tgtUid[i] = if (s == S_TOPLANT || s == S_TOMEAT) 0 else uid[target]
@@ -693,6 +729,18 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
     private fun releasePlant(i: Int) {
         val p = tgt[i]
         if (p in 0 until cfg.plants && plantClaim[p] == i) plantClaim[p] = -1
+    }
+
+    /**
+     * true if nobody else is going for plant [p] or eating it. A claim only counts while its owner is alive and
+     * really on its way to that plant or eating it, so a claim left behind can never lock a plant.
+     */
+    private fun plantFree(p: Int): Boolean {
+        val c = plantClaim[p]
+        if (c < 0) return true
+        if (alive[c] && (st[c].toInt() == S_TOPLANT || st[c].toInt() == S_EAT) && tgt[c] == p) return false
+        plantClaim[p] = -1
+        return true
     }
 
     private fun releaseTarget(i: Int) {
@@ -756,7 +804,7 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
         for (cy in y0..y1) for (cx in x0..x1) {
             var p = pHead[cy * gw + cx]
             while (p >= 0) {
-                if (plantG[p] >= 1f && plantClaim[p] < 0 && !plantCovered[p]) {
+                if (plantG[p] >= 1f && !plantCovered[p] && plantFree(p)) {
                     val dx = plantX[p] - xi; val dy = plantY[p] - yi
                     val d2 = dx * dx + dy * dy
                     if (d2 < bd && d2 <= r2) { best = p; bd = d2 }
@@ -783,7 +831,7 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
             for (cy in y0..y1) for (cx in x0..x1) {
                 var p = pHead[cy * gw + cx]
                 while (p >= 0) {
-                    if (plantG[p] >= 1f && plantClaim[p] < 0 && !plantCovered[p]) {
+                    if (plantG[p] >= 1f && !plantCovered[p] && plantFree(p)) {
                         val dx = plantX[p] - xi; val dy = plantY[p] - yi
                         val dd = dx * dx + dy * dy
                         if (dd <= r2) { val wgt = d.plantEfficiency / (2f + sqrt(dd)); sw += wgt; sx += plantX[p] * wgt; sy += plantY[p] * wgt; n++ }
@@ -903,7 +951,7 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
                     val p = tgt[i]
                     if (p >= 0 && plantClaim[p] == i && !plantCovered[p]) {
                         en[i] = min(d.maxEnergy, en[i] + cfg.plantEnergy * d.plantEfficiency)
-                        rlBonus[i] += cfg.plantEnergy * d.plantEfficiency / d.maxEnergy * cfg.foodRewardScale
+                        rwFood[i] += cfg.plantEnergy * d.plantEfficiency / d.maxEnergy * cfg.foodRewardScale
                         plantG[p] = 0f; plantClaim[p] = -1
                         meals[i]++; mealCount[sp[i].toInt()]++
                     }
@@ -944,7 +992,7 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
                 val take = min(meatAmt[m], 1.2f)
                 meatAmt[m] -= take
                 en[i] = min(d.maxEnergy, en[i] + take * d.meatEfficiency)
-                rlBonus[i] += take * d.meatEfficiency / d.maxEnergy * cfg.foodRewardScale
+                rwFood[i] += take * d.meatEfficiency / d.maxEnergy * cfg.foodRewardScale
                 if (meatAmt[m] <= 0f || en[i] >= d.maxEnergy * 0.98f) {
                     if (en[i] >= d.maxEnergy * 0.98f) full[i] = true
                     meals[i]++; mealCount[sp[i].toInt()]++; tgt[i] = -1; st[i] = S_WANDER.toByte()
@@ -1078,7 +1126,7 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
         out[8] = 1f
     }
 
-    private fun tryMate(m: Int, f: Int) {
+    internal fun tryMate(m: Int, f: Int) {
         val d = def(m)
         // shelters are only for protection: no mating inside one
         if (!cfg.matingInShelter && (inAnyShelter(x[m], y[m], 0f) || inAnyShelter(x[f], y[f], 0f))) return
@@ -1090,6 +1138,9 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
         // each species has its own room, so one species cannot fill the world and stop the others breeding
         val room = cfg.speciesCap[sp[f].toInt()] - count[sp[f].toInt()]
         if (cfg.speciesCap[sp[f].toInt()] > 0 && n > room) n = room
+        // fix 17: each baby costs its share of an average litter's cost, and the mother keeps a reserve
+        val perBaby = d.maxEnergy * cfg.litterCost / max(1f, (d.litterMin + d.litterMax) / 2f)
+        if (cfg.litterCostBySize) n = min(n, ((en[f] - d.maxEnergy * cfg.litterReserve) / max(1e-6f, perBaby)).toInt())
         if (n <= 0 || freeTop < n) return
 
         val s = sp[f].toInt()
@@ -1115,10 +1166,10 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
             litSp[lit] = s; litN[lit] = n; litMatured[lit] = 0; litLeft[lit] = n; litTag[lit] = litNextTag++
         }
 
-        // one litter costs the mother half her max energy, whatever its size
-        en[f] = max(0f, en[f] - d.maxEnergy * cfg.litterCost)
+        // one litter costs the mother half her max energy (fix 17: more for a big litter, less for a small one)
+        en[f] = max(0f, en[f] - if (cfg.litterCostBySize) perBaby * n else d.maxEnergy * cfg.litterCost)
         en[m] = max(0f, en[m] - d.maxEnergy * cfg.fatherCost)
-        rlBonus[f] += cfg.matingReward; rlBonus[m] += cfg.matingReward
+        rwMate[f] += cfg.matingReward; rwMate[m] += cfg.matingReward
         mateCd[f] = d.femaleCooldownDays * DAY_TICKS
         lastMate[f] = tick; lastMate[m] = tick
         matings[f]++; matings[m]++
@@ -1128,6 +1179,22 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
         for (k in 0 until n) {
             val baby = spawnBaby(f, m)
             if (lit >= 0) { litterOf[baby] = lit; litterTagOf[baby] = litTag[lit] }
+        }
+    }
+
+    /**
+     * Fix 16: a baby grew up. Each parent still alive gets its share of [SimConfig.grownUpReward] (a whole litter of
+     * average size gives the full reward), so the brain learns that raising babies pays, not just mating.
+     */
+    internal fun grewUp(i: Int) {
+        if (cfg.grownUpReward <= 0f || brain?.learning != true) return
+        val d = def(i)
+        val r = cfg.grownUpReward / max(1f, (d.litterMin + d.litterMax) / 2f)
+        val m = motherSlot[i]
+        if (m >= 0 && alive[m] && uid[m] == motherUid[i]) rwKids[m] += r
+        val fu = fatherUid[i]
+        if (fu != 0) for (j in 0 until cap) {
+            if (alive[j] && uid[j] == fu) { rwKids[j] += r; break }
         }
     }
 
@@ -1145,7 +1212,7 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
         mc.learn(s, litFeat, lit * MC_IN, true, mc.litterReward(s, litMatured[lit].toFloat() / max(1, litN[lit])))
     }
 
-    private fun spawnBaby(f: Int, m: Int): Int {
+    internal fun spawnBaby(f: Int, m: Int): Int {
         val s = sp[f].toInt()
         val d = defs[s]
         val i = allocSlot()
@@ -1187,7 +1254,7 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
             // dying is bad, unless it is old age after having babies
             if (b.learning) {
                 val r = if (cause == C_OLD && offspring[i] > 0) 0f else -cfg.deathPenalty
-                b.death(i, uid[i], r)
+                b.death(i, uid[i], r * b.learner(s, family[i].toInt()).genes.motive[M_DEATH])
                 rewardSum[s] += r
             }
         }
@@ -1267,6 +1334,16 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
     private fun rescueCheck() {
         for (s in 0 until NSP) {
             if (cfg.startCounts[s] <= 0) continue
+            if (cfg.immigration) {
+                // fix 18: newcomers walk in at the edge, now and then; the species may stay wiped out until then
+                val min = max(1, cfg.minPopulation[s])
+                if (count[s] < min && tick - lastImmigrants[s] >= cfg.immigrationEvery) {
+                    val wiped = count[s] == 0
+                    rescueSpecies(s, if (wiped) max(cfg.rescueCount, min) else min - count[s], if (wiped) "rescue" else "topup", atEdge = true)
+                    lastImmigrants[s] = tick
+                }
+                continue
+            }
             if (count[s] == 0) {
                 rescueSpecies(s)
                 noteRescue(s)
@@ -1280,7 +1357,7 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
     /** Fix 10: a species that keeps dying out has a broken brain, so it starts again from random weights. */
     private fun noteRescue(s: Int) {
         val b = brain ?: return
-        if (cfg.brainResetRescues <= 0 || !b.learning || b.frozen) return
+        if (cfg.brainResetRescues <= 0 || cfg.immigration || !b.learning || b.frozen) return
         val ring = rescueTicks[s]
         ring[rescueN[s] % ring.size] = tick
         rescueN[s]++
@@ -1299,13 +1376,14 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
     /**
      * Fix 15: a brain family with no members left is replaced by a changed copy of the family with the most
      * members. Brains that keep their creatures alive and breeding spread; the others disappear.
+     * Fix 19: a family with far fewer members than the biggest is replaced too, and the copy's genes change a little
+     * (brain size, learning settings, motivations), so evolution chooses them. Every check logs each family's genes.
      */
     private fun refillFamilies() {
         val b = brain ?: return
         if (!b.learning || b.frozen) return
         for (s in 0 until NSP) {
             val nf = cfg.brainFamilies[s]
-            if (nf <= 1 || count[s] == 0) continue
             val members = IntArray(nf)
             for (n in 0 until nOrder) {
                 val i = order[n]
@@ -1313,23 +1391,51 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
             }
             var best = 0
             for (f in 1 until nf) if (members[f] > members[best]) best = f
-            if (members[best] < max(2, cfg.familyCopyMinMembers)) continue
-            for (f in 0 until nf) {
-                if (members[f] > 0 || f == best) continue
-                b.copyFamily(s, best, f, cfg.brainMutation)
-                familyCopies++
-                history.event(tick, "brain_copy", s, best, f, 0f, 0f, "family $f died out: copied family $best (${members[best]} members) with small changes")
-                // give the new family a few members so it can be tried out
-                var moved = 0
-                for (n in 0 until nOrder) {
-                    val i = order[n]
-                    if (moved >= max(1, members[best] / 4)) break
-                    if (alive[i] && sp[i].toInt() == s && family[i].toInt() == best && n % 2 == 0) {
-                        b.handOver(i, uid[i]); family[i] = f.toByte(); moved++
+            if (nf > 1 && count[s] > 0 && members[best] >= max(2, cfg.familyCopyMinMembers)) {
+                for (f in 0 until nf) {
+                    if (f == best) continue
+                    val weak = members[f] == 0 || (cfg.familyReplaceShare > 0f && members[f] < members[best] * cfg.familyReplaceShare &&
+                        tick - b.learner(s, f).bornTick >= 2L * cfg.familyCheckEvery)
+                    if (!weak) continue
+                    val genes = if (cfg.evolveBrains) b.learner(s, best).genes.mutate(rng, cfg.brainGeneMutation, cfg.brainGrowChance,
+                        cfg.brainMinSize, cfg.brainMaxSize) else null
+                    val had = members[f]
+                    b.copyFamily(s, best, f, cfg.brainMutation, genes)
+                    familyCopies++
+                    history.event(tick, "brain_copy", s, best, f, 0f, 0f,
+                        (if (had == 0) "family $f died out" else "family $f had only $had members") +
+                            ": copied family $best (${members[best]} members) with small changes" + (genes?.let { " (${it.describe()})" } ?: ""))
+                    // give the new family a few members so it can be tried out
+                    var moved = had
+                    for (n in 0 until nOrder) {
+                        val i = order[n]
+                        if (moved >= max(1, members[best] / 4)) break
+                        if (alive[i] && sp[i].toInt() == s && family[i].toInt() == best && n % 2 == 0) {
+                            b.handOver(i, uid[i]); family[i] = f.toByte(); moved++; members[best]--; members[f]++
+                        }
                     }
                 }
             }
+            b.logGenes(tick, s, members)
+            recordGenes(s, members)
         }
+    }
+
+    /** Adds one point per gene to [geneCurves]: the average over the species' creatures (each family weighted by its members). */
+    private fun recordGenes(s: Int, members: IntArray) {
+        val b = brain ?: return
+        val nf = cfg.brainFamilies[s]
+        val total = members.sum()
+        val v = FloatArray(NGC)
+        for (f in 0 until nf) {
+            val wgt = if (total > 0) members[f].toFloat() / total else 1f / nf
+            val g = b.learner(s, f).genes
+            v[GC_HIDDEN] += wgt * g.hidden; v[GC_LAYERS] += wgt * g.layers; v[GC_LR] += wgt * g.lr
+            v[GC_CURIOSITY] += wgt * g.entropy; v[GC_HORIZON] += wgt * g.horizon
+            for (k in 0 until NM) v[GC_MOTIVE + k] += wgt * g.motive[k]
+        }
+        for (k in 0 until NGC) geneCurves[s][k].add(tick, v[k], 0f)
+        geneCurveVersion++
     }
 
     private fun bestFamily(s: Int): Int {
@@ -1346,7 +1452,7 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
      * Brings a species back with [SimConfig.rescueCount] adults whose genes are copied from the best
      * creatures the species ever had, each with a small random change.
      */
-    fun rescueSpecies(s: Int, howMany: Int = cfg.rescueCount, kind: String = "rescue"): IntArray {
+    fun rescueSpecies(s: Int, howMany: Int = cfg.rescueCount, kind: String = "rescue", atEdge: Boolean = false): IntArray {
         val d = defs[s]
         val made = ArrayList<Int>()
         val from = ArrayList<Int>()
@@ -1358,7 +1464,18 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
                 for (j in 0 until cap) if (alive[j] && sp[j].toInt() == s) { if (female[j]) females++ else males++ }
                 val fem = if (males == females) rng.chance(0.5f) else females < males
                 val i = allocSlot()
-                initCreature(i, s, fem, rng.range(2f, width - 2f), rng.range(2f, height - 2f), d.maturityTicks)
+                var xx = rng.range(2f, width - 2f); var yy = rng.range(2f, height - 2f)
+                if (atEdge) {
+                    // immigrants arrive from outside: somewhere along the edge, not inside a stranger's shelter
+                    var tries = 0
+                    do {
+                        val side = rng.nextInt(4)
+                        val t = rng.nextFloat()
+                        xx = when (side) { 0 -> 1.5f; 1 -> width - 1.5f; else -> 1.5f + t * (width - 3f) }
+                        yy = when (side) { 2 -> 1.5f; 3 -> height - 1.5f; else -> 1.5f + t * (height - 3f) }
+                    } while (foreignShelterAt(s, xx, yy) >= 0 && tries++ < 20)
+                }
+                initCreature(i, s, fem, xx, yy, d.maturityTicks)
                 val hc = hofCount[s]
                 if (hc > 0) {
                     val c = n % hc
@@ -1375,8 +1492,8 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
         }
         if (kind == "rescue") rescues++ else topUps++
         extinct[s] = false
-        val note = if (from.isEmpty()) "added ${made.size} with average genes"
-            else "added ${made.size} from the best genes of ${from.distinct().joinToString(" ")}"
+        val note = (if (atEdge) "immigrants at the map edge: " else "") + (if (from.isEmpty()) "added ${made.size} with average genes"
+            else "added ${made.size} from the best genes of ${from.distinct().joinToString(" ")}")
         history.event(tick, kind, s, made.size, 0, 0f, 0f, note)
         return made.toIntArray()
     }
@@ -1447,15 +1564,20 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
             val ry = (y[i] / height * REGIONS).toInt().coerceIn(0, REGIONS - 1)
             val bit = 1L shl (ry * REGIONS + rx)
             if (visited[i] and bit == 0L) {
-                if (visited[i] != 0L) rlBonus[i] += cfg.exploreReward
+                if (visited[i] != 0L) rwExplore[i] += cfg.exploreReward
                 visited[i] = visited[i] or bit
             }
         }
         // resting while hungry costs a little, so searching for food pays more than standing still
         val restCost = if (lastAction[i].toInt() == A_REST && en[i] < d.maxEnergy * cfg.restPenaltyBelow) -cfg.hungryRestPenalty else 0f
-        val reward = hurt + starving + restCost + rlBonus[i]
-        rlBonus[i] = 0f; prevEn[i] = en[i]; prevHp[i] = hp[i]
-        rewardSum[sp[i].toInt()] += reward; decisionCount[sp[i].toInt()]++
+        // fix 19: the brain learns from the reward as its family's motivations weigh it (all 1 without evolution);
+        // the exam and the stats use the plain reward, so scores stay comparable while motivations change
+        val mo = b.learner(sp[i].toInt(), family[i].toInt()).genes.motive
+        val plain = hurt + starving + restCost + rwFood[i] + rwMate[i] + rwKids[i] + rwExplore[i]
+        val reward = mo[M_HURT] * hurt + mo[M_HUNGER] * (starving + restCost) + mo[M_FOOD] * rwFood[i] + mo[M_MATE] * rwMate[i] +
+            mo[M_KIDS] * rwKids[i] + mo[M_EXPLORE] * rwExplore[i]
+        rwFood[i] = 0f; rwMate[i] = 0f; rwKids[i] = 0f; rwExplore[i] = 0f; prevEn[i] = en[i]; prevHp[i] = hp[i]
+        rewardSum[sp[i].toInt()] += plain; decisionCount[sp[i].toInt()]++
         val a = b.act(i, uid[i], sp[i].toInt(), family[i].toInt(), obs, amask, reward)
         lastAction[i] = a.toByte()
         actRecent[sp[i].toInt()][a] += 1f
@@ -1571,7 +1693,8 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
         o[25] = foreignShelterNear(i)
         // fix 5: how rich the area is in ripe plants (twice the smell range)
         // how much food it senses within the forage range, and where it is (for the "forage" choice)
-        val canForage = !full[i] && forageGoal(i)
+        // always measured (a full creature used to read the previous creature's number here)
+        val canForage = forageGoal(i) && !full[i]
         o[26] = min(1f, foodNear / 8f)
         // fix 2: how long it has been in its shelter, and whether it must stay out
         o[27] = if (cfg.shelterMaxStay > 0) min(1f, shelterT[i].toFloat() / cfg.shelterMaxStay) else 0f
@@ -1648,6 +1771,9 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
         java.util.Arrays.fill(extinct, false)
         rescues = 0; topUps = 0; brainResets = 0; familyCopies = 0; totalKills = 0; totalBirths = 0; totalDeaths = 0
         java.util.Arrays.fill(rescueN, 0); java.util.Arrays.fill(lastReset, -1_000_000L)
+        java.util.Arrays.fill(lastImmigrants, -1_000_000L)
+        for (s in 0 until NSP) for (c in geneCurves[s]) c.clear()
+        geneCurveVersion++
         java.util.Arrays.fill(litTag, 0); litPtr = 0
         for (s in 0 until NSP) {
             popCurve[s].clear(); java.util.Arrays.fill(deathTotals[s], 0L); java.util.Arrays.fill(actRecent[s], 0f)
@@ -1754,6 +1880,11 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
             it.brainStats = cachedStats
             it.deathCurves = cachedDeaths
             it.wipeouts = Array(NSP) { s -> wipeouts[s].toLongArray() }
+            if (cachedGenes == null || genesSeen != geneCurveVersion) {
+                cachedGenes = Array(NSP) { s -> Array(NGC) { k -> geneCurves[s][k].copy() } }
+                genesSeen = geneCurveVersion
+            }
+            it.geneCurves = cachedGenes
             val b = brain
             if (b != null) {
                 val total = b.learners.sumOf { l -> l.updates } + 100000 * b.examCurves.sumOf { c -> c.n }
@@ -1774,6 +1905,7 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
                 it.acceptRate = FloatArray(NSP) { s -> b.mateChoice.prob(s, AVG_MALE) }
                 it.babiesGrowUp = b.mateChoice.avgSurvive.copyOf()
                 it.updates = IntArray(NSP) { s -> (0 until cfg.brainFamilies[s]).sumOf { f -> b.learner(s, f).updates } }
+                it.familyGenes = Array(NSP) { s -> Array(cfg.brainFamilies[s]) { f -> b.learner(s, f).genes.copy() } }
                 it.familyMembers = Array(NSP) { s ->
                     val m = IntArray(cfg.brainFamilies[s])
                     for (n in 0 until nOrder) { val i = order[n]; if (alive[i] && sp[i].toInt() == s) m[family[i].toInt().coerceIn(0, m.size - 1)]++ }
@@ -1784,6 +1916,10 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
     }
 
     private var curvesSeen = -1
+    /** Changes whenever [geneCurves] get a point (so the snapshot copies them only then). */
+    var geneCurveVersion = 0
+    private var genesSeen = -1
+    private var cachedGenes: Array<Array<LearnCurve>>? = null
     private var popCurveSeen = -1L
     private var cachedPop: Array<LearnCurve>? = null
     private var cachedStats: BrainStats? = null

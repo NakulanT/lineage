@@ -179,8 +179,7 @@ class PlatformTest {
         val m = (0 until w.cap).first { w.alive[it] && w.sp[it].toInt() == BETA && !w.female[it] && w.isMature(it) }
         for (j in listOf(f, m)) { w.x[j] = w.shX[k]; w.y[j] = w.shY[k] + (if (j == f) 0.3f else -0.3f); w.en[j] = w.defs[BETA].maxEnergy; w.mateCd[j] = 0 }
         val births = w.totalBirths
-        val tryMate = World::class.java.getDeclaredMethod("tryMate", Int::class.java, Int::class.java).also { it.isAccessible = true }
-        repeat(20) { tryMate.invoke(w, m, f) }
+        repeat(20) { w.tryMate(m, f) }
         assertEquals(births, w.totalBirths, "babies were made inside a shelter")
     }
 
