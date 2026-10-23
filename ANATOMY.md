@@ -383,5 +383,11 @@ Every run is a **version** with its own folder (`~/LineageRuns/v2`, `v3`, ... on
 - Memory and step time now grow with the population (each slot is under 1 KB, plus the brains' buffers); nothing stops
   a run that outgrows the phone, so watch it there.
 
+## 14c. Bigger comebacks (`rescueGrowth`)
+- A wiped-out species comes back with `rescueGrowth` more creatures than the time before: the first comeback is the
+  usual rescue (`rescueCount`, or the minimum with immigrants), then + `rescueGrowth` for every earlier wipe-out.
+  With 6 and 6: 6, 12, 18, 24, ... The count of wipe-outs comes from `events.csv`, so it carries on after a reload.
+- 0 (the default) keeps the old behaviour: always the same number.
+
 ## 15. Not built yet
 - Social memory, food sharing beyond mother and baby, signals, killing within a species (see `PHASE_2.md`).

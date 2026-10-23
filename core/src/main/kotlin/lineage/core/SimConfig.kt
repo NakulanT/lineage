@@ -28,6 +28,8 @@ class SimConfig(
     /** Adds a few creatures when a species falls to zero. Every use is logged. */
     val rescueEnabled: Boolean = true,
     val rescueCount: Int = 6,
+    /** A wiped-out species comes back with this many more creatures than the time before (0 = always the same). */
+    val rescueGrowth: Int = 0,
 
     // ---- fixes for the shelter trap ----
     /** Fix 1: false = a shelter does not heal a creature with 0 energy, so starving always hurts. */
@@ -224,7 +226,7 @@ class SimConfig(
         m["plants"] = "$plants"; m["plantRegrowTicks"] = "$plantRegrowTicks"; m["plantEnergy"] = "$plantEnergy"
         m["shelters"] = shelters.joinToString(","); m["mutation"] = "$mutation"
         m["foreignShelterDamage"] = "$foreignShelterDamage"; m["meatFromAllDeaths"] = "$meatFromAllDeaths"
-        m["rescueEnabled"] = "$rescueEnabled"; m["rescueCount"] = "$rescueCount"
+        m["rescueEnabled"] = "$rescueEnabled"; m["rescueCount"] = "$rescueCount"; m["rescueGrowth"] = "$rescueGrowth"
         m["shelterHealsStarving"] = "$shelterHealsStarving"; m["shelterMaxStay"] = "$shelterMaxStay"
         m["shelterCooldown"] = "$shelterCooldown"; m["shelterCapacity"] = shelterCapacity.joinToString(",")
         m["shelterHungerPenalty"] = "$shelterHungerPenalty"; m["smellScale"] = "$smellScale"
@@ -307,6 +309,7 @@ class SimConfig(
                 mutation = f("mutation", d.mutation), foreignShelterDamage = f("foreignShelterDamage", d.foreignShelterDamage),
                 meatFromAllDeaths = b("meatFromAllDeaths", d.meatFromAllDeaths),
                 rescueEnabled = b("rescueEnabled", d.rescueEnabled), rescueCount = i("rescueCount", d.rescueCount),
+                rescueGrowth = i("rescueGrowth", d.rescueGrowth),
                 shelterHealsStarving = b("shelterHealsStarving", d.shelterHealsStarving),
                 shelterMaxStay = i("shelterMaxStay", d.shelterMaxStay), shelterCooldown = i("shelterCooldown", d.shelterCooldown),
                 shelterCapacity = ints("shelterCapacity", d.shelterCapacity),

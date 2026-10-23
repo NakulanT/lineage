@@ -46,6 +46,7 @@ object Params {
             b("allCanHunt", "Every species can attack the others", "Off: only Alpha hunts."),
             b("rescueEnabled", "Rescue a species that dies out", "Adds new creatures from its best genes."),
             i("rescueCount", "Creatures added by a rescue", "", 1, 100, 1),
+            i("rescueGrowth", "More each time it dies out", "A wiped-out species comes back with this many more creatures than the time before. 0 = always the same.", 0, 500, 1),
             i("minPopulation", "Minimum population", "Topped up from the best genes when below this. 0 = off.", 0, 500, 1, true),
             b("immigration", "Immigrants instead of rescues", "Newcomers arrive at the map edge, at most once per wait below; no brain resets (fix 18)."),
             i("immigrationEvery", "Immigrants at most every (steps)", "Per species. A species can stay wiped out until then.", 100, 1000000, 500),

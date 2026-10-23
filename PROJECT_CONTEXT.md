@@ -478,3 +478,9 @@ Code is in this folder. Shared Kotlin simulation (`core`), shared screen (`ui`),
   brains (size, learning, motivations) can be told apart on the map. On by default; the **families** button or `C` turns it off.
 - The Evolution tab on the stats page shows each family in the same colour next to its genes.
 - Families only differ once the family checks have replaced a weak family with a changed copy (every 3,000 steps).
+
+## 39. Bigger comebacks, v2 remade [Decided by the user: "if something wipes out, create it again with more number every time"]
+- New setting `rescueGrowth`: each time a species is wiped out it comes back with that many more creatures than the
+  time before (0 = off, the default, so older versions run as before). Details in `ANATOMY.md` section 14c.
+- v2 remade: v1's settings with a 64 x 64 map, no shelters, no population cap (fix 20), comebacks right away (no
+  immigrant wait) growing by `rescueGrowth` each time.

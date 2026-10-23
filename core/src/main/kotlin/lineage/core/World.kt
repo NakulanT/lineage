@@ -1383,13 +1383,13 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
                 val min = max(1, cfg.minPopulation[s])
                 if (count[s] < min && tick - lastImmigrants[s] >= cfg.immigrationEvery) {
                     val wiped = count[s] == 0
-                    rescueSpecies(s, if (wiped) max(cfg.rescueCount, min) else min - count[s], if (wiped) "rescue" else "topup", atEdge = true)
+                    rescueSpecies(s, if (wiped) comeback(s, max(cfg.rescueCount, min)) else min - count[s], if (wiped) "rescue" else "topup", atEdge = true)
                     lastImmigrants[s] = tick
                 }
                 continue
             }
             if (count[s] == 0) {
-                rescueSpecies(s)
+                rescueSpecies(s, comeback(s, cfg.rescueCount))
                 noteRescue(s)
             } else if (count[s] < cfg.minPopulation[s] && tick % cfg.logEveryTicks == 0L) {
                 // fix 9: keep enough creatures for the brain to learn from
@@ -1397,6 +1397,12 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
             }
         }
     }
+
+    /**
+     * How many come back after a wipe-out: [base], plus [SimConfig.rescueGrowth] for every earlier wipe-out of the species
+     * (the one just now is already in [wipeouts]). So each comeback is bigger than the last.
+     */
+    private fun comeback(s: Int, base: Int): Int = base + cfg.rescueGrowth * max(0, wipeouts[s].size - 1)
 
     /** Fix 10: a species that keeps dying out has a broken brain, so it starts again from random weights. */
     private fun noteRescue(s: Int) {

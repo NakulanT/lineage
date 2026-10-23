@@ -181,6 +181,20 @@ class FixesTest {
         assertTrue(w.brain!!.learners.size == w.cfg.brainFamilies.sum())
     }
 
+    /** rescueGrowth: every time a species is wiped out it comes back with more creatures than the time before. */
+    @Test
+    fun eachComebackIsBigger() {
+        val w = World(small(mapOf("immigration" to "false", "rescueCount" to "6", "rescueGrowth" to "10", "brainResetRescues" to "0")))
+        val sizes = ArrayList<Int>()
+        repeat(3) {
+            for (i in 0 until w.cap) if (w.alive[i] && w.sp[i].toInt() == ALPHA) { w.hp[i] = -1f; w.en[i] = 0f }
+            w.step()
+            sizes.add(w.count[ALPHA])
+        }
+        assertEquals(listOf(6, 16, 26), sizes)
+        assertEquals(3, w.wipeouts[ALPHA].size)
+    }
+
     /** Fix 9: a species below its minimum is topped up. */
     @Test
     fun smallSpeciesAreToppedUp() {
