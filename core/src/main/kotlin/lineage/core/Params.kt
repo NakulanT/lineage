@@ -32,8 +32,8 @@ object Params {
     val groups: List<ParamGroup> = listOf(
         ParamGroup("World", listOf(
             i("startCounts", "Creatures at the start", "How many of each species the world starts with.", 0, 5000, 5, true),
-            i("hardCap", "Population cap (all)", "No more babies once this many creatures are alive in total.", 50, 5000, 50),
-            i("speciesCap", "Population cap per species", "Most of each species. 0 = only the total cap.", 0, 5000, 25, true),
+            i("hardCap", "Population cap (all)", "No more babies once this many creatures are alive in total. 0 = no cap, the population can erupt.", 0, 5000, 50),
+            i("speciesCap", "Population cap per species", "Most of each species. 0 = no cap for that species.", 0, 5000, 25, true),
             i("width", "Map width (cells)", "", 32, 512, 16),
             i("height", "Map height (cells)", "", 32, 512, 16),
             i("plants", "Plants", "Number of plants on the map (one kind).", 10, 10000, 50),

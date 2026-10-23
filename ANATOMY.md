@@ -207,7 +207,8 @@ She accepts if score + a small random amount (±0.12) is above her own pickiness
 
 ### 5.3 Babies
 - Babies from one mating: Alpha 5 to 10, Beta 15 to 20, Gamma 5 to 10 (was 30 to 50, which filled the cap in 6 days),
-  scaled by the parents' fertility gene. If the total cap or the species' own cap would be passed, the litter is cut to fit.
+  scaled by the parents' fertility gene. There is no cap by default (fix 20), so a population can erupt. A version that
+  sets a total cap or a species' own cap has its litters cut to fit.
 - Babies per mating: Alpha 5-10, Beta 10-15, Gamma 15-20 (set by the user).
 - One litter costs the mother 50% of her max energy, whatever its size (she needs at least 60% to mate). With fix 17 the cost follows the litter size (section 14).
   The father pays 10% of his max energy.
@@ -246,7 +247,7 @@ Six numbers per creature, 1.0 = species average:
 |---|---|
 | Map | 128 × 128 cells |
 | Start | 5 Alpha, 20 Beta, 100 Gamma |
-| Population cap | 900 in total (fix 12; was 1,500), and at most Alpha 100, Beta 300, Gamma 500 |
+| Population cap | none (fix 20): any number can be born. Fix 12 had 900 in total and Alpha 100, Beta 300, Gamma 500; version 1 had 1,500 |
 | Plants | 700, one kind only (fix 11; was 400) |
 | Plant food | 50 energy (times the species' plant value) |
 | Plant regrowth | from 0 to ripe in 600 steps (fix 11; was 1,700, then 1,000), in the same place. Only ripe plants can be eaten |
@@ -289,6 +290,7 @@ Every run is a **version** with its own folder (`~/LineageRuns/v2`, `v3`, ... on
 | 13 | Healthier babies | 30% energy, mother gives 12 | 50%, mother gives 16 |
 | 14 | Females learn mate choice | fixed rule | learned |
 | 15 | Brain families that evolve | 1 brain per species | 2 / 2 / 3 families |
+| 20 | No population cap | fix 12's caps (900, 100 / 300 / 500) | no cap at all (`hardCap` 0, `speciesCap` 0,0,0) |
 
 ---
 
@@ -365,6 +367,17 @@ Every run is a **version** with its own folder (`~/LineageRuns/v2`, `v3`, ... on
     family's genes now. `brain_genes.csv` in the version folder has one row per family per check. The creature brain view
     shows its family's genes.
 - Old versions keep running as before: a settings file without these keys gets them switched off.
+
+## 14b. No population cap (fix 20)
+- `hardCap` and `speciesCap` default to 0, which means no cap: births are never cut, so a population can erupt and is
+  held back only by food, hunting, age and starving.
+- The creature arrays start with room for 1,024 (or twice the starting creatures) and double whenever every slot is
+  taken (`World.growTo`); the brains' buffers grow with them. A grown world runs exactly like one that started that big,
+  so a seed still gives the same run. A save remembers its size and loads into a world that grows to fit.
+- Both caps are still settings: a version can set them again (0 = off). Switching fix 20 off gives fix 12's caps;
+  switching 12 off too gives version 1's 1,500. Old versions keep the caps written in their settings file.
+- Memory and step time now grow with the population (each slot is under 1 KB, plus the brains' buffers); nothing stops
+  a run that outgrows the phone, so watch it there.
 
 ## 15. Not built yet
 - Social memory, food sharing beyond mother and baby, signals, killing within a species (see `PHASE_2.md`).

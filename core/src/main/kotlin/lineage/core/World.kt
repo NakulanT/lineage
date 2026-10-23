@@ -33,6 +33,8 @@ val STATE_NAMES = arrayOf(
 private const val CELL = 8f
 private const val TRAIL_LEN = 40
 private const val MAX_MEAT = 512
+/** Creature slots made at the start when there is no cap (fix 20); more are added as the population grows. */
+private const val START_SLOTS = 1024
 private const val HIST = 720
 private const val THINK_EVERY = 3
 private const val EAT_TICKS = 20
@@ -70,65 +72,67 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
     private val decideEvery = cfg.decideEvery
     val width = cfg.width.toFloat()
     val height = cfg.height.toFloat()
-    val cap = cfg.hardCap + 64
+    /** Slots in the creature arrays. Fix 20: with no cap they grow (double) whenever every slot is taken. */
+    var cap = (if (cfg.hardCap > 0) cfg.hardCap else max(START_SLOTS, cfg.startCounts.sum() * 2)) + 64
+        private set
     val rng = Rng(cfg.seed)
     var tick = 0L
     var nextUid = 1
 
     // ---- creatures ----
-    val alive = BooleanArray(cap)
-    val uid = IntArray(cap)
-    val sp = ByteArray(cap)
-    val female = BooleanArray(cap)
-    val x = FloatArray(cap)
-    val y = FloatArray(cap)
-    val h = FloatArray(cap)
-    val px = FloatArray(cap)
-    val py = FloatArray(cap)
-    val ph = FloatArray(cap)
-    val age = IntArray(cap)
-    val hp = FloatArray(cap)
-    val en = FloatArray(cap)
-    val st = ByteArray(cap)
-    val tgt = IntArray(cap)
-    val tgtUid = IntArray(cap)
-    val timer = IntArray(cap)
-    val atkCd = IntArray(cap)
-    val huntCd = IntArray(cap)
-    val mateCd = IntArray(cap)
-    val hurtT = IntArray(cap)
-    val motherSlot = IntArray(cap)
-    val motherUid = IntArray(cap)
-    val fatherUid = IntArray(cap)
-    val partnerUid = IntArray(cap)
-    val gen = IntArray(cap)
-    val genes = FloatArray(cap * NG)
-    val kills = IntArray(cap)
-    val meals = IntArray(cap)
-    val offspring = IntArray(cap)
-    val matings = IntArray(cap)
-    val lastMate = LongArray(cap)
-    val birthTick = LongArray(cap)
-    val dist = FloatArray(cap)
-    val flags = ByteArray(cap)
-    val trail = FloatArray(cap * TRAIL_LEN * 2)
-    val trailN = IntArray(cap)
-    val trailHead = IntArray(cap)
-    val trailAcc = FloatArray(cap)
+    var alive = BooleanArray(cap); private set
+    var uid = IntArray(cap); private set
+    var sp = ByteArray(cap); private set
+    var female = BooleanArray(cap); private set
+    var x = FloatArray(cap); private set
+    var y = FloatArray(cap); private set
+    var h = FloatArray(cap); private set
+    var px = FloatArray(cap); private set
+    var py = FloatArray(cap); private set
+    var ph = FloatArray(cap); private set
+    var age = IntArray(cap); private set
+    var hp = FloatArray(cap); private set
+    var en = FloatArray(cap); private set
+    var st = ByteArray(cap); private set
+    var tgt = IntArray(cap); private set
+    var tgtUid = IntArray(cap); private set
+    var timer = IntArray(cap); private set
+    var atkCd = IntArray(cap); private set
+    var huntCd = IntArray(cap); private set
+    var mateCd = IntArray(cap); private set
+    var hurtT = IntArray(cap); private set
+    var motherSlot = IntArray(cap); private set
+    var motherUid = IntArray(cap); private set
+    var fatherUid = IntArray(cap); private set
+    var partnerUid = IntArray(cap); private set
+    var gen = IntArray(cap); private set
+    var genes = FloatArray(cap * NG); private set
+    var kills = IntArray(cap); private set
+    var meals = IntArray(cap); private set
+    var offspring = IntArray(cap); private set
+    var matings = IntArray(cap); private set
+    var lastMate = LongArray(cap); private set
+    var birthTick = LongArray(cap); private set
+    var dist = FloatArray(cap); private set
+    var flags = ByteArray(cap); private set
+    var trail = FloatArray(cap * TRAIL_LEN * 2); private set
+    var trailN = IntArray(cap); private set
+    var trailHead = IntArray(cap); private set
+    var trailAcc = FloatArray(cap); private set
     /** Brain family (fix 15): babies get their mother's. */
-    val family = ByteArray(cap)
+    var family = ByteArray(cap); private set
     /** Steps spent inside its own shelter in this stay, and steps it must wait before going back (fix 2). */
-    val shelterT = IntArray(cap)
-    val shelterCd = IntArray(cap)
+    var shelterT = IntArray(cap); private set
+    var shelterCd = IntArray(cap); private set
     /** Parts of the map (8 x 8 regions, one bit each) it has been to (fix 6). */
-    val visited = LongArray(cap)
+    var visited = LongArray(cap); private set
     /** Which litter a young creature belongs to, for learning mate choice (fix 14). */
-    private val litterOf = IntArray(cap) { -1 }
-    private val litterTagOf = IntArray(cap)
+    private var litterOf = IntArray(cap) { -1 }
+    private var litterTagOf = IntArray(cap)
 
-    val order = IntArray(cap)
+    var order = IntArray(cap); private set
     var nOrder = 0
-    private val freeSlots = IntArray(cap)
+    private var freeSlots = IntArray(cap)
     private var freeTop = 0
     val count = IntArray(NSP)
     var aliveCount = 0
@@ -138,7 +142,7 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
     private val gw = (cfg.width + 7) / 8
     private val gh = (cfg.height + 7) / 8
     private val gHead = IntArray(gw * gh)
-    private val gNext = IntArray(cap)
+    private var gNext = IntArray(cap)
 
     // ---- plants ----
     val plantX = FloatArray(cfg.plants)
@@ -169,7 +173,7 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
     private val plantCovered = BooleanArray(cfg.plants)
     private val meatCovered = BooleanArray(MAX_MEAT)
     /** Ate to full: cannot eat again until its energy drops below [SimConfig.satietyLevel]. */
-    val full = BooleanArray(cap)
+    var full = BooleanArray(cap); private set
     /** Creatures inside or heading into each shelter (fix 3). */
     val shOcc = IntArray(cfg.shelters.sum())
 
@@ -249,12 +253,12 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
     var brainStats = BrainStats(cfg.brainSize, cfg.brainLayers)
     private var explainCount = 0L
     /** Reward earned since its last decision, by kind (the brain family's motivations weigh them, fix 19). */
-    private val rwFood = FloatArray(cap)
-    private val rwMate = FloatArray(cap)
-    internal val rwKids = FloatArray(cap)
-    private val rwExplore = FloatArray(cap)
-    private val prevEn = FloatArray(cap)
-    private val prevHp = FloatArray(cap)
+    private var rwFood = FloatArray(cap)
+    private var rwMate = FloatArray(cap)
+    internal var rwKids = FloatArray(cap); private set
+    private var rwExplore = FloatArray(cap)
+    private var prevEn = FloatArray(cap)
+    private var prevHp = FloatArray(cap)
     private val obs = FloatArray(OBS)
     private val amask = BooleanArray(NA)
     private var sPlant = -1
@@ -264,10 +268,10 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
     private var sMate = -1
     private var sShelter = -1
     /** What each creature last decided (shown in the stats panel). */
-    val lastAction = ByteArray(cap)
+    var lastAction = ByteArray(cap); private set
     /** Where a foraging creature is heading (the middle of the food it senses). */
-    private val goalX = FloatArray(cap)
-    private val goalY = FloatArray(cap)
+    private var goalX = FloatArray(cap)
+    private var goalY = FloatArray(cap)
     private var foodNear = 0f
 
     private var moveFactor = 0f
@@ -430,7 +434,45 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
         }
     }
 
-    private fun allocSlot(): Int = freeSlots[--freeTop]
+    private fun allocSlot(): Int {
+        if (freeTop == 0) growTo(cap * 2)
+        return freeSlots[--freeTop]
+    }
+
+    /** Fix 20: makes sure [n] slots are free, growing the creature arrays if needed. */
+    private fun ensureFree(n: Int) {
+        if (freeTop < n) growTo(max(cap * 2, cap + n - freeTop + 64))
+    }
+
+    /** Grows every per-creature array to [n] slots, keeping all creatures where they are. Called by Persist too. */
+    fun growTo(n: Int) {
+        if (n <= cap) return
+        val old = cap
+        alive = alive.copyOf(n); uid = uid.copyOf(n); sp = sp.copyOf(n); female = female.copyOf(n)
+        x = x.copyOf(n); y = y.copyOf(n); h = h.copyOf(n); px = px.copyOf(n); py = py.copyOf(n); ph = ph.copyOf(n)
+        age = age.copyOf(n); hp = hp.copyOf(n); en = en.copyOf(n); st = st.copyOf(n)
+        tgt = tgt.copyOf(n); tgtUid = tgtUid.copyOf(n); timer = timer.copyOf(n)
+        atkCd = atkCd.copyOf(n); huntCd = huntCd.copyOf(n); mateCd = mateCd.copyOf(n); hurtT = hurtT.copyOf(n)
+        motherSlot = motherSlot.copyOf(n); motherUid = motherUid.copyOf(n); fatherUid = fatherUid.copyOf(n); partnerUid = partnerUid.copyOf(n)
+        gen = gen.copyOf(n); genes = genes.copyOf(n * NG)
+        kills = kills.copyOf(n); meals = meals.copyOf(n); offspring = offspring.copyOf(n); matings = matings.copyOf(n)
+        lastMate = lastMate.copyOf(n); birthTick = birthTick.copyOf(n); dist = dist.copyOf(n); flags = flags.copyOf(n)
+        trail = trail.copyOf(n * TRAIL_LEN * 2); trailN = trailN.copyOf(n); trailHead = trailHead.copyOf(n); trailAcc = trailAcc.copyOf(n)
+        family = family.copyOf(n); shelterT = shelterT.copyOf(n); shelterCd = shelterCd.copyOf(n); visited = visited.copyOf(n)
+        litterOf = litterOf.copyOf(n).also { java.util.Arrays.fill(it, old, n, -1) }; litterTagOf = litterTagOf.copyOf(n)
+        order = order.copyOf(n); gNext = gNext.copyOf(n); full = full.copyOf(n)
+        rwFood = rwFood.copyOf(n); rwMate = rwMate.copyOf(n); rwKids = rwKids.copyOf(n); rwExplore = rwExplore.copyOf(n)
+        prevEn = prevEn.copyOf(n); prevHp = prevHp.copyOf(n); lastAction = lastAction.copyOf(n)
+        goalX = goalX.copyOf(n); goalY = goalY.copyOf(n)
+        // the new slots go under the free ones, so slots are handed out exactly as in a world that started this big
+        val free = IntArray(n)
+        var k = 0
+        for (i in n - 1 downTo old) free[k++] = i
+        System.arraycopy(freeSlots, 0, free, k, freeTop)
+        freeSlots = free; freeTop += k
+        cap = n
+        brain?.ensureSlots(n)
+    }
 
     private fun initCreature(i: Int, s: Int, fem: Boolean, xx: Float, yy: Float, ageTicks: Int) {
         alive[i] = true
@@ -1134,14 +1176,15 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
         var n = d.litterMin + rng.nextInt(d.litterMax - d.litterMin + 1)
         val fert = (gene(m, G_FERT) + gene(f, G_FERT)) / 2f
         n = max(1, (n * fert + 0.5f).toInt())
-        if (aliveCount + n > cfg.hardCap) n = cfg.hardCap - aliveCount
+        // fix 20: hardCap 0 = no cap, so a population can erupt
+        if (cfg.hardCap > 0 && aliveCount + n > cfg.hardCap) n = cfg.hardCap - aliveCount
         // each species has its own room, so one species cannot fill the world and stop the others breeding
         val room = cfg.speciesCap[sp[f].toInt()] - count[sp[f].toInt()]
         if (cfg.speciesCap[sp[f].toInt()] > 0 && n > room) n = room
         // fix 17: each baby costs its share of an average litter's cost, and the mother keeps a reserve
         val perBaby = d.maxEnergy * cfg.litterCost / max(1f, (d.litterMin + d.litterMax) / 2f)
         if (cfg.litterCostBySize) n = min(n, ((en[f] - d.maxEnergy * cfg.litterReserve) / max(1e-6f, perBaby)).toInt())
-        if (n <= 0 || freeTop < n) return
+        if (n <= 0) return
 
         val s = sp[f].toInt()
         val b = brain
@@ -1176,6 +1219,7 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
         partnerUid[f] = uid[m]; partnerUid[m] = uid[f]
         matingCount[sp[f].toInt()]++
 
+        ensureFree(n)
         for (k in 0 until n) {
             val baby = spawnBaby(f, m)
             if (lit >= 0) { litterOf[baby] = lit; litterTagOf[baby] = litTag[lit] }
@@ -1458,7 +1502,7 @@ class World(val cfg: SimConfig, val history: HistoryLog = NullHistory) {
         val from = ArrayList<Int>()
         val fam = bestFamily(s)
         repeat(howMany) { n ->
-            if (freeTop > 0 && aliveCount < cfg.hardCap) {
+            if (cfg.hardCap <= 0 || aliveCount < cfg.hardCap) {
                 // whichever sex is missing more (a top-up of one used to always be a female)
                 var males = 0; var females = 0
                 for (j in 0 until cap) if (alive[j] && sp[j].toInt() == s) { if (female[j]) females++ else males++ }

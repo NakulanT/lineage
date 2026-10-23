@@ -10,10 +10,10 @@ class SimConfig(
     val width: Int = 128,
     val height: Int = 128,
     val startCounts: IntArray = intArrayOf(5, 20, 100),
-    /** Fix 12: lower cap (was 1500) so food can keep up with breeding. */
-    val hardCap: Int = 900,
-    /** Most creatures of each species (0 = only the total cap). Stops one species taking all the room. */
-    val speciesCap: IntArray = intArrayOf(100, 300, 500),
+    /** Most creatures alive in total. 0 = no cap (fix 20: populations can erupt). Fix 12 had 900 (was 1500). */
+    val hardCap: Int = 0,
+    /** Most creatures of each species (0 = no cap for that species). Fix 12 had 100, 300, 500; fix 20 removes it. */
+    val speciesCap: IntArray = intArrayOf(0, 0, 0),
     /** Fix 11: more plants (was 400). With the faster regrowth below, about 2.9x the food of 400 plants at 1000 steps. */
     val plants: Int = 700,
     /** Fix 11: plants grow back faster (was 1700 steps, then 1000). */

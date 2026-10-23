@@ -31,6 +31,60 @@ class WorldTest {
         repeat(3000) { w.step(); assertTrue(w.aliveCount <= 200, "alive ${w.aliveCount} at ${w.tick}") }
     }
 
+    private fun uncapped(seed: Long = 5L) = SimConfig(
+        seed = seed, width = 96, height = 96, startCounts = intArrayOf(10, 50, 200),
+        hardCap = 0, speciesCap = intArrayOf(0, 0, 0), plants = 900, shelters = intArrayOf(1, 3, 6), brain = false,
+    )
+
+    /** Fix 20: the default has no population cap. */
+    @Test
+    fun defaultHasNoCap() {
+        val d = SimConfig()
+        assertEquals(0, d.hardCap)
+        assertTrue(d.speciesCap.all { it == 0 })
+        assertTrue(Fixes.all.first { it.num == 20 }.isOn(d))
+        // switching fix 20 off brings back fix 12's caps, switching both off brings back version 1's
+        assertEquals(900, Fixes.without(d, listOf(20)).hardCap)
+        assertEquals(1500, Fixes.without(d, listOf(12, 20)).hardCap)
+    }
+
+    /** Fix 20: growing the creature arrays changes nothing about how the world runs. */
+    @Test
+    fun growingTheArraysChangesNothing() {
+        val a = World(uncapped()); val b = World(uncapped())
+        repeat(400) { a.step(); b.step() }
+        b.growTo(b.cap * 3)
+        repeat(1200) { a.step(); b.step() }
+        assertEquals(a.aliveCount, b.aliveCount)
+        assertEquals(a.totalBirths, b.totalBirths)
+        for (i in 0 until a.cap) {
+            assertEquals(a.alive[i], b.alive[i])
+            if (a.alive[i]) { assertEquals(a.x[i], b.x[i]); assertEquals(a.y[i], b.y[i]) }
+        }
+    }
+
+    /** Fix 20: with no cap a population can grow past the slots the world started with (with learning brains too). */
+    @Test
+    fun populationCanErupt() {
+        val c = uncapped().with(mapOf("brain" to "true", "brainSize" to "16", "plants" to "4000", "plantRegrowTicks" to "100"))
+        val w = World(c)
+        val start = w.cap
+        var t = 0
+        while (w.cap == start && t++ < 20000) w.step()
+        assertTrue(w.cap > start, "never grew: ${w.aliveCount} alive after $t steps, $start slots")
+        assertTrue(w.aliveCount > start - 64, "alive ${w.aliveCount}")
+        repeat(200) { w.step() }
+        // and it still saves and loads at its new size
+        val f = File.createTempFile("lineage", ".save")
+        try {
+            Persist.save(w, f)
+            val b = World(c)
+            assertTrue(Persist.load(b, f))
+            assertEquals(w.aliveCount, b.aliveCount)
+            repeat(50) { b.step() }
+        } finally { f.delete() }
+    }
+
     @Test
     fun instinctsKeepStrangersOutOfShelters() {
         val cfg = small()

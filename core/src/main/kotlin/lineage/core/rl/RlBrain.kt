@@ -66,22 +66,30 @@ class SpeciesLearner(
     /** Step at which this family got its current brain (a new copy is not judged straight away). */
     var bornTick = 0L
 
-    // experience buffer (PPO)
-    private val capacity = cap
-    val obs = FloatArray(capacity * OBS)
-    val mask = BooleanArray(capacity * NA)
-    val act = IntArray(capacity)
-    val logp = FloatArray(capacity)
-    val value = FloatArray(capacity)
-    val rew = FloatArray(capacity)
-    val nextV = FloatArray(capacity)
-    val done = BooleanArray(capacity)
-    val complete = BooleanArray(capacity)
-    val nextIdx = IntArray(capacity)
-    val slotOf = IntArray(capacity)
-    private val adv = FloatArray(capacity)
-    private val ret = FloatArray(capacity)
+    // experience buffer (PPO); it grows when a bigger population fills it (fix 20)
+    private var capacity = cap
+    var obs = FloatArray(capacity * OBS); private set
+    var mask = BooleanArray(capacity * NA); private set
+    var act = IntArray(capacity); private set
+    var logp = FloatArray(capacity); private set
+    var value = FloatArray(capacity); private set
+    var rew = FloatArray(capacity); private set
+    var nextV = FloatArray(capacity); private set
+    var done = BooleanArray(capacity); private set
+    var complete = BooleanArray(capacity); private set
+    var nextIdx = IntArray(capacity); private set
+    var slotOf = IntArray(capacity); private set
+    private var adv = FloatArray(capacity)
+    private var ret = FloatArray(capacity)
     var count = 0
+
+    private fun growBuffer(n: Int) {
+        obs = obs.copyOf(n * OBS); mask = mask.copyOf(n * NA)
+        act = act.copyOf(n); logp = logp.copyOf(n); value = value.copyOf(n); rew = rew.copyOf(n); nextV = nextV.copyOf(n)
+        done = done.copyOf(n); complete = complete.copyOf(n); nextIdx = nextIdx.copyOf(n); slotOf = slotOf.copyOf(n)
+        adv = adv.copyOf(n); ret = ret.copyOf(n)
+        capacity = n
+    }
     var nComplete = 0
 
     // imitation buffer (copying instincts at the start)
@@ -146,6 +154,7 @@ class SpeciesLearner(
     fun probOf(a: Int) = probs[a]
 
     fun add(o: FloatArray, m: BooleanArray, a: Int, lp: Float, v: Float, slot: Int): Int {
+        if (count == capacity) growBuffer(capacity * 2)
         val t = count++
         System.arraycopy(o, 0, obs, t * OBS, OBS)
         System.arraycopy(m, 0, mask, t * NA, NA)
@@ -384,12 +393,15 @@ class SpeciesLearner(
  * creature should do and tells it what happened afterwards (reward). It learns while the world runs.
  */
 class RlBrain(
-    val cap: Int,
+    cap: Int,
     val p: RlParams = RlParams(),
     seed: Long = 1L,
     val families: IntArray = intArrayOf(1, 1, 1),
     val batches: IntArray = intArrayOf(p.batch, p.batch, p.batch),
 ) {
+    /** Creature slots of the world (grows with it, see [ensureSlots]). */
+    var cap = cap
+        private set
     private val rng = Rng(seed xor 0x5DEECE66DL)
     /** First learner index of each species. */
     val base = IntArray(NSP).also { var k = 0; for (s in 0 until NSP) { it[s] = k; k += families[s] } }
@@ -412,9 +424,17 @@ class RlBrain(
     /** Exam scores per species (reward per decision in a fixed test world), one point per exam. */
     val examCurves = Array(NSP) { LearnCurve(400) }
 
-    private val pendIdx = IntArray(cap) { -1 }
-    private val pendUid = IntArray(cap)
-    private val pendL = IntArray(cap)
+    private var pendIdx = IntArray(cap) { -1 }
+    private var pendUid = IntArray(cap)
+    private var pendL = IntArray(cap)
+
+    /** The world grew its creature slots (fix 20): room for a pending decision in every slot. */
+    fun ensureSlots(n: Int) {
+        if (n <= cap) return
+        pendIdx = pendIdx.copyOf(n).also { java.util.Arrays.fill(it, cap, n, -1) }
+        pendUid = pendUid.copyOf(n); pendL = pendL.copyOf(n)
+        cap = n
+    }
     private var log: FileWriter? = null
     private var genesLog: FileWriter? = null
     var currentTick = 0L

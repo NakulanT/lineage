@@ -465,3 +465,10 @@ Code is in this folder. Shared Kotlin simulation (`core`), shared screen (`ui`),
 - Measured on v2 (900 creatures, all caps full) on the Intel i9 laptop (8 cores, 16 threads): 91% of the simulation's time was brain training (`Mlp.backward`) on one core. Each family's update froze the world for up to 535 ms, and the world ran at 31 steps/s (3x normal speed at "max").
 - Training now splits every minibatch into 16 fixed pieces that run on all cores (`rl/Par.kt`, per-thread `Mlp.Pass`), with gradients added in a fixed order, so a seed still gives exactly the same run on any machine. It also skips the unused input gradient. Result: 31 -> 98 steps/s, longest freeze 535 -> 100 ms.
 - Drawing: a creature's detail now follows its size on screen (`Art.detailFor`): a dot below 3 px, main shapes below 7 px, everything above. A full frame on the Retina screen went from 53 to 31 ms. The window draws a frame only when the last one had time to finish (at most about two thirds of its thread), and 15 frames/s while paused and untouched, so clicks and zooming never queue up. Window thread: about 63% -> 21% of a core.
+
+## 37. No population cap [Decided by the user: "don't set the limit for the population as population can erupt"]
+- Fix 20: no total cap and no cap per species by default (`hardCap` 0, `speciesCap` 0,0,0). Food, hunting, age and
+  starving are the only limits, so a population can erupt and crash.
+- The creature arrays and the brains' buffers now grow when full instead of being fixed at the cap. Growing does not
+  change the run (same seed, same world), and saves load at any size.
+- The caps are still settings (0 = off); old versions keep theirs. Details in `ANATOMY.md` section 14b.

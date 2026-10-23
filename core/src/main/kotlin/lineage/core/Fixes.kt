@@ -4,9 +4,14 @@ package lineage.core
  * The fixes, each as a switch: the settings it uses when on, and the version 1 settings when off.
  * The new-version screen and the command line (--fixes-off 1,4) both use this list.
  */
-class Fix(val num: Int, val title: String, val on: Map<String, String>, val off: Map<String, String>) {
+class Fix(
+    val num: Int, val title: String, val on: Map<String, String>, val off: Map<String, String>,
+    /** When set, decides if the fix is on (for a fix whose settings an older fix also changes). */
+    private val test: ((SimConfig) -> Boolean)? = null,
+) {
     /** On when the settings are not the version 1 values (so a version with older or tuned numbers still counts as on). */
     fun isOn(cfg: SimConfig): Boolean {
+        test?.let { return it(cfg) }
         val p = cfg.toProps()
         return off.any { (k, v) -> !same(p[k], v) }
     }
@@ -40,7 +45,7 @@ object Fixes {
         Fix(10, "Reset a brain that keeps dying out", mapOf("brainResetRescues" to v("brainResetRescues")), mapOf("brainResetRescues" to "0")),
         Fix(11, "More food: more plants, faster regrowth", mapOf("plants" to v("plants"), "plantRegrowTicks" to v("plantRegrowTicks")),
             mapOf("plants" to "400", "plantRegrowTicks" to "1700")),
-        Fix(12, "Lower cap, and room for each species", mapOf("hardCap" to v("hardCap"), "speciesCap" to v("speciesCap")),
+        Fix(12, "Lower cap, and room for each species", mapOf("hardCap" to "900", "speciesCap" to "100,300,500"),
             mapOf("hardCap" to "1500", "speciesCap" to "0,0,0")),
         Fix(13, "Healthier babies", mapOf("babyEnergy" to v("babyEnergy"), "motherFeed" to v("motherFeed")),
             mapOf("babyEnergy" to "0.3", "motherFeed" to "12.0")),
@@ -55,6 +60,9 @@ object Fixes {
         Fix(19, "Brains evolve: size, learning, motivations",
             mapOf("evolveBrains" to "true", "familyReplaceShare" to v("familyReplaceShare"), "brainEnergyCost" to v("brainEnergyCost")),
             mapOf("evolveBrains" to "false", "familyReplaceShare" to "0.0", "brainEnergyCost" to "0.0")),
+        // off = fix 12's caps; with fix 12 also off, fix 12 then puts back version 1's cap (see [without])
+        Fix(20, "No population cap: populations can erupt", mapOf("hardCap" to "0", "speciesCap" to "0,0,0"),
+            mapOf("hardCap" to "900", "speciesCap" to "100,300,500"), test = { c -> c.hardCap <= 0 && c.speciesCap.all { it <= 0 } }),
     )
 
     /** Short text of what is on, e.g. "fixes 1-7, 9-15". */
@@ -72,10 +80,10 @@ object Fixes {
         return "fixes " + parts.joinToString(", ")
     }
 
-    /** Settings with the listed fixes switched off. */
+    /** Settings with the listed fixes switched off (newest first, so an older fix that shares settings has the last word). */
     fun without(cfg: SimConfig, nums: Collection<Int>): SimConfig {
         var c = cfg
-        for (f in all) if (f.num in nums) c = f.apply(c, false)
+        for (f in all.asReversed()) if (f.num in nums) c = f.apply(c, false)
         return c
     }
 }

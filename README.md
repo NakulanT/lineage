@@ -99,6 +99,7 @@ allow both so the world keeps running with the screen off.
 
 Options: `--seed N --alpha N --beta N --gamma N --size N --cap N --plants N --resume`,
 `--v1` (all fixes off), `--fixes-off 1,4,15`, `--settings v3/settings.txt` (a version's settings).
+There is no population cap by default (fix 20); `--cap N` sets one.
 
 Compare runs (start and end reward, exam scores and a verdict per species):
 

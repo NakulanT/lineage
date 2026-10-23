@@ -57,11 +57,13 @@ object Persist {
             val magic = i.readInt()
             if (magic != MAGIC && magic != MAGIC_V2 && magic != MAGIC_V1) return false
             val cap = i.readInt(); val plants = i.readInt()
-            if (cap != w.cap || plants != w.cfg.plants) return false
+            if (plants != w.cfg.plants) return false
+            // fix 20: the world may have grown past its starting slots before it was saved
+            if (cap > w.cap) w.growTo(cap) else if (cap != w.cap && w.cfg.hardCap > 0) return false
             w.tick = i.readLong(); w.nextUid = i.readInt(); w.maxGeneration = i.readInt()
             w.rng.state = i.readLong()
             w.clearCreatures()
-            for (s in 0 until w.cap) {
+            for (s in 0 until cap) {
                 if (!i.readBoolean()) continue
                 w.restoreSlot(s)
                 w.uid[s] = i.readInt(); w.sp[s] = i.readByte(); w.female[s] = i.readBoolean()

@@ -37,7 +37,7 @@ class FixesTest {
         }
         val v1 = d.with(SimConfig.VERSION_1)
         assertTrue(Fixes.all.none { it.isOn(v1) }, Fixes.summary(v1))
-        assertEquals("fixes 1-7, 9-19", Fixes.summary(d))
+        assertEquals("fixes 1-7, 9-20", Fixes.summary(d))
     }
 
     /** Fix 1: a starving creature resting in its own shelter loses health instead of healing. */
